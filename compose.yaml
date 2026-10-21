@@ -1,0 +1,86 @@
+# pi-sandbox-local — Docker Compose fleet for sandboxed pi.
+#
+# Normally driven by `pis` (bin/pis), which exports the interpolation vars below:
+#   SANDBOX_WORKDIR  host repo bind-mounted at /workspace (required)
+#   KVM_GID          gid of /dev/kvm on the host (android service)
+#   HOST_UID/HOST_GID  build-args mapping the container user to you
+#   PI_VERSION       pi version baked into the images
+#   DOCKER_HASH      content stamp; stale images auto-rebuild on next `pis`
+#
+# Security posture (see docs/security.md): non-root user, cap_drop: ALL,
+# no-new-privileges, no docker.sock, no published ports, outbound egress only.
+# Credentials arrive as process env (XIAOMI_TOKEN_PLAN_SGP_API_KEY) and are
+# never written to disk inside a sandbox.
+
+x-hardening: &hardening
+  init: true
+  restart: "no"
+  cap_drop: ["ALL"]
+  security_opt: ["no-new-privileges:true"]
+  working_dir: /workspace
+  command: ["keep-alive"]
+  environment:
+    XIAOMI_TOKEN_PLAN_SGP_API_KEY: "${XIAOMI_TOKEN_PLAN_SGP_API_KEY:-}"
+
+x-build-args: &build-args
+  HOST_UID: "${HOST_UID:-1000}"
+  HOST_GID: "${HOST_GID:-1000}"
+  PI_VERSION: "${PI_VERSION:-1.2.0}"
+  DOCKER_HASH: "${DOCKER_HASH:-}"
+
+services:
+  general:
+    <<: *hardening
+    image: pi-sandbox:general
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.base
+      args:
+        <<: *build-args
+    volumes:
+      - "${SANDBOX_WORKDIR:?SANDBOX_WORKDIR must point at the repo to mount}:/workspace"
+      - "./pi-home:/opt/pi-home:ro"
+      - "pi-home-general:/home/pi/.pi/agent"
+      - "mise-data-general:/home/pi/.local/share/mise"
+
+  web:
+    <<: *hardening
+    image: pi-sandbox:web
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+      args:
+        <<: *build-args
+    volumes:
+      - "${SANDBOX_WORKDIR:?SANDBOX_WORKDIR must point at the repo to mount}:/workspace"
+      - "./pi-home:/opt/pi-home:ro"
+      - "pi-home-web:/home/pi/.pi/agent"
+      - "mise-data-web:/home/pi/.local/share/mise"
+      - "pw-browsers:/opt/pw-browsers"
+
+  android:
+    <<: *hardening
+    image: pi-sandbox:android
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.android
+      args:
+        <<: *build-args
+    devices: ["/dev/kvm"]
+    group_add: ["${KVM_GID:-0}"]
+    volumes:
+      - "${SANDBOX_WORKDIR:?SANDBOX_WORKDIR must point at the repo to mount}:/workspace"
+      - "./pi-home:/opt/pi-home:ro"
+      - "pi-home-android:/home/pi/.pi/agent"
+      - "mise-data-android:/home/pi/.local/share/mise"
+      - "gradle-cache:/home/pi/.gradle"
+
+volumes:
+  pi-home-general:
+  pi-home-web:
+  pi-home-android:
+  mise-data-general:
+  mise-data-web:
+  mise-data-android:
+  pw-browsers:
+  gradle-cache:

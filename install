@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# install — one-time setup for pi-sandbox-local. Idempotent: safe to re-run.
+#
+#   ./install              install pis, seed .env, run checks, build images
+#   ./install --no-build   skip image builds (pis auto-builds on first use anyway)
+#   ./install --no-auth-seed   don't touch .env
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_DIR="$HOME/.config/pi-sandbox"
+CONFIG_FILE="$CONFIG_DIR/config"
+BIN_DIR="$HOME/.local/bin"
+
+NO_BUILD=0 NO_AUTH=0
+for a in "$@"; do
+  case "$a" in
+    --no-build) NO_BUILD=1 ;;
+    --no-auth-seed) NO_AUTH=1 ;;
+    *) echo "install: unknown option $a" >&2; exit 1 ;;
+  esac
+done
+
+# --- 1. launcher (symlinked: repo edits to bin/pis are live immediately) ------
+echo "• linking pis → $BIN_DIR/pis (symlink to $HERE/bin/pis)"
+mkdir -p "$BIN_DIR" "$CONFIG_DIR"
+ln -sfn "$HERE/bin/pis" "$BIN_DIR/pis"
+
+# --- 2. config (preserve a previously chosen PI_VERSION) ---------------------
+PI_VERSION="${PI_VERSION:-1.2.0}"
+if [[ -f "$CONFIG_FILE" ]]; then
+  old="$(sed -nE 's/^PI_VERSION="?([^"]+)"?$/\1/p' "$CONFIG_FILE" | head -1)"
+  if [[ -n "$old" ]]; then PI_VERSION="$old"; fi
+fi
+cat > "$CONFIG_FILE" <<EOF
+# pi-sandbox config (written by ./install; PI_SANDBOX_HOME is this checkout)
+PI_SANDBOX_HOME="$HERE"
+PI_VERSION="$PI_VERSION"
+EOF
+echo "• config → $CONFIG_FILE (PI_VERSION=$PI_VERSION)"
+
+# --- 3. PATH -----------------------------------------------------------------
+if ! grep -qs '\.local/bin' "$HOME/.bashrc"; then
+  # shellcheck disable=SC2016  # literal $HOME/$PATH must land in .bashrc unexpanded.
+  printf '\n# pis (pi-sandbox-local)\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$HOME/.bashrc"
+  echo "• added ~/.local/bin to PATH in ~/.bashrc (open a new shell or: source ~/.bashrc)"
+fi
+
+# --- 4. seed .env with the Xiaomi key (value is never printed) ---------------
+if [[ $NO_AUTH == 0 && ! -f "$HERE/.env" ]]; then
+  key="" key_from=""
+  if [[ -n "${XIAOMI_TOKEN_PLAN_SGP_API_KEY:-}" ]]; then
+    key="$XIAOMI_TOKEN_PLAN_SGP_API_KEY"; key_from="environment"
+  elif [[ -f "$HOME/.pi/agent/auth.json" ]] && command -v jq >/dev/null 2>&1; then
+    key="$(jq -r '."xiaomi-token-plan-sgp".key // empty' "$HOME/.pi/agent/auth.json" 2>/dev/null || true)"
+    key_from="$HOME/.pi/agent/auth.json"
+  fi
+  if [[ -n "$key" ]]; then
+    umask 077
+    printf 'XIAOMI_TOKEN_PLAN_SGP_API_KEY=%s\n' "$key" > "$HERE/.env"
+    echo "• auth: seeded .env from $key_from (gitignored; value never printed)"
+  else
+    echo "• auth: could not seed .env — copy .env.example to .env and set XIAOMI_TOKEN_PLAN_SGP_API_KEY"
+  fi
+fi
+
+# --- 5. checks ---------------------------------------------------------------
+echo "• environment checks (pis doctor):"
+if ! "$BIN_DIR/pis" doctor; then
+  echo "• doctor reported issues above — fix them, then re-run ./install" >&2
+fi
+
+# --- 6. images ---------------------------------------------------------------
+if [[ $NO_BUILD == 0 ]]; then
+  echo "• building sandbox images (first build takes several minutes)…"
+  "$BIN_DIR/pis" rebuild all
+fi
+
+echo
+echo "Done. The everyday command is:  pis"
+echo "  cd ~/work/personal-crm && pis     # android sandbox, straight into pi"
+echo "  pis -p \"your task\"                # unattended one-shot"
+echo "  pis doctor                        # re-run checks any time"

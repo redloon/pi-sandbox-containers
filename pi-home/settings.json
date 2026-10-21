@@ -1,0 +1,14 @@
+{
+  "lastChangelogVersion": "1.2.0",
+  "theme": "dark",
+  "defaultProvider": "xiaomi-token-plan-sgp",
+  "defaultModel": "mimo-v2.6-pro",
+  "defaultThinkingLevel": "medium",
+  "packages": [
+    "npm:pi-codex-goal",
+    "npm:pi-exit-cmd",
+    "npm:@juicesharp/rpiv-ask-user-question",
+    "npm:@narumitw/pi-plan-mode"
+  ],
+  "defaultProjectTrust": "always"
+}

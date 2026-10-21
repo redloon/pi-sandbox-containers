@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# seed-pi-home — copy the tracked pi-home overlay into the sandbox agent directory.
+#
+# Runs at container start (entrypoint) and before every `pis` invocation, so edits
+# to pi-home/ on the host apply immediately without rebuilding or recreating
+# anything. Idempotent and cheap: rsync only copies what changed.
+#
+# Guarantees:
+#   - never touches sessions/ (per-sandbox session history lives in the volume)
+#   - never creates auth.json (auth is env-var passthrough by design, see
+#     docs/security.md); actively removes one if it somehow appeared
+set -euo pipefail
+
+SRC="/opt/pi-home"
+DST="${PI_CODING_AGENT_DIR:-/home/pi/.pi/agent}"
+
+[[ -d "$SRC" ]] || exit 0
+
+mkdir -p "$DST"
+
+if [[ ! -w "$DST" ]]; then
+  echo "seed-pi-home: $DST is not writable (volume ownership problem)." >&2
+  echo "  fix: pis clean -y && pis   (recreates the volume from the image)" >&2
+  exit 1
+fi
+
+rsync -a \
+  --exclude 'auth.json' \
+  --exclude 'sessions/' \
+  --exclude 'reviews/' \
+  "$SRC/" "$DST/"
+
+# Belt and braces: credentials on disk are forbidden in sandboxes (auth is
+# env-var passthrough only, see docs/security.md). Pi drops a benign empty
+# {} auth.json stub at startup; a *populated* one would mean a real credential
+# landed on disk — both are removed here, the latter loudly.
+if [[ -f "$DST/auth.json" ]]; then
+  if jq -e 'type == "object" and length == 0' "$DST/auth.json" >/dev/null 2>&1; then
+    rm -f "$DST/auth.json"
+  else
+    echo "seed-pi-home: WARNING — $DST/auth.json contained credentials and was removed." >&2
+    echo "  Auth is env-var passthrough by design; credentials inside sandboxes are" >&2
+    echo "  discarded. (If you ran /login in a sandbox, that credential is gone.)" >&2
+    rm -f "$DST/auth.json"
+  fi
+fi

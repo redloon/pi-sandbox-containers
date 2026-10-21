@@ -1,0 +1,75 @@
+# pi-sandbox:general — base image for all pi sandboxes.
+#
+# Layer order: ubuntu:24.04 → OS tooling → non-root user `pi` (host UID/GID)
+# → mise → node → pi CLI → /opt/pi-home overlay (bind-mounted over at runtime).
+#
+# The web and android images build `FROM pi-sandbox:general`, so build this one
+# first (`pis rebuild general`, or let `pis` handle ordering automatically).
+ARG BASE_IMAGE=ubuntu:24.04
+FROM ${BASE_IMAGE}
+
+ARG HOST_UID=1000
+ARG HOST_GID=1000
+ARG PI_VERSION=1.2.0
+ARG DOCKER_HASH=
+LABEL org.pi-sandbox.dockerhash="${DOCKER_HASH}" \
+      org.pi-sandbox.profile="general"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# --- OS tooling ("bells and whistles" that every sandbox should have) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      bash bash-completion ca-certificates curl wget git ripgrep fd-find jq \
+      unzip zip rsync build-essential python3 python3-pip python3-venv \
+      tmux procps coreutils file less openssh-client sqlite3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf "$(command -v fdfind)" /usr/local/bin/fd
+
+# --- non-root user `pi` mapped to the invoking host user (bind-mount ownership) ---
+RUN if getent group "${HOST_GID}" >/dev/null; then \
+      groupmod -n pi "$(getent group "${HOST_GID}" | cut -d: -f1)"; \
+    else \
+      groupadd -g "${HOST_GID}" pi; \
+    fi \
+ && if getent passwd "${HOST_UID}" >/dev/null; then \
+      old="$(getent passwd "${HOST_UID}" | cut -d: -f1)"; \
+      usermod -l pi "$old"; \
+      usermod -g pi pi; \
+      usermod -d /home/pi -m pi; \
+      usermod -s /bin/bash pi; \
+    else \
+      useradd -m -u "${HOST_UID}" -g "${HOST_GID}" -s /bin/bash pi; \
+    fi
+
+# --- mise (required in every environment) + node + pi ---
+# Tools are installed as user `pi` into MISE_DATA_DIR; the named volume mounted
+# there at runtime is seeded from this image content on first use.
+USER pi
+ENV MISE_DATA_DIR=/home/pi/.local/share/mise \
+    MISE_CONFIG_DIR=/home/pi/.config/mise \
+    PATH=/home/pi/.local/share/mise/shims:/home/pi/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+RUN curl -fsSL https://mise.run | sh \
+ && /home/pi/.local/bin/mise use -g node@24 \
+ && /home/pi/.local/bin/mise reshim \
+ && npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@${PI_VERSION}" \
+ && /home/pi/.local/bin/mise reshim \
+ && printf '%s\n' 'eval "$(/home/pi/.local/bin/mise activate bash)"' >> /home/pi/.bashrc \
+ && printf '%s\n' 'export PI_SANDBOX_NOTICE="pi runs inside a Docker sandbox (pi-sandbox-local)"' >> /home/pi/.bashrc
+
+# --- tracked pi-home overlay (bind-mounted read-only over this at runtime) ---
+USER root
+COPY --chown=pi:pi pi-home /opt/pi-home
+COPY docker/entrypoint.sh docker/seed-pi-home /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/seed-pi-home
+
+# Named volumes copy image content up on first use — pre-create their mount
+# points with the right ownership or Docker seeds them root-owned and pi cannot
+# write sessions/… (kept last so the toolchain layers above stay cacheable).
+RUN install -d -o pi -g pi /home/pi/.pi/agent /home/pi/.gradle
+
+USER pi
+WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["keep-alive"]

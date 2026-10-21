@@ -1,0 +1,31 @@
+# pi-sandbox:web — general sandbox + Playwright with pre-baked Chromium.
+#
+# Browsers live in /opt/pw-browsers (a named volume seeds itself from this image
+# on first use). They are installed with `playwright@latest`; if a project pins a
+# different Playwright version, run `npx playwright install chromium` once inside
+# the sandbox — it writes into the same persistent path (see docs/troubleshooting.md).
+#
+# Playwright runs with `chromiumSandbox: false` inside containers: the sandbox
+# boundary is the container itself, and Chromium's setuid sandbox is incompatible
+# with the hardened capability set (cap_drop: ALL).
+ARG BASE_IMAGE=pi-sandbox:general
+FROM ${BASE_IMAGE}
+
+ARG DOCKER_HASH=
+ARG PLAYWRIGHT_VERSION=latest
+LABEL org.pi-sandbox.dockerhash="${DOCKER_HASH}" \
+      org.pi-sandbox.profile="web"
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+
+USER pi
+RUN npm install -g --ignore-scripts "playwright@${PLAYWRIGHT_VERSION}"
+
+# --with-deps needs apt, so run the browser install as root, then hand the
+# browser tree back to the runtime user.
+USER root
+RUN npx playwright install --with-deps chromium \
+ && rm -rf /var/lib/apt/lists/* \
+ && chown -R pi:pi /opt/pw-browsers
+
+USER pi

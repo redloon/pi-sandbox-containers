@@ -1,0 +1,9 @@
+# Secrets never enter git.
+.env
+
+# pi-home/npm is a generated pre-warm copy of the host's installed pi packages
+# (created by config sync); it is copied into sandboxes at startup.
+pi-home/npm/
+
+# Machine-local sync bookkeeping.
+pi-home/.sync-stamp

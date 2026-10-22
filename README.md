@@ -93,6 +93,11 @@ through to pi (e.g. a prompt literally named "shell").
   the state intact; `pis shell` / `pis logs` work any time afterwards.
 - **Workspaces**: each repo is bind-mounted read-write at `/workspace` (and
   nothing else from your home directory is visible).
+- **Invariants, regression-tested**: `scripts/qa.sh` runs hermetic checks that
+  config deletions propagate at every layer (host → `pi-home/` → container
+  volume), junk extension files are quarantined before they can break pi
+  startup, and credentials never reach disk. Run it after touching `bin/pis`
+  or `docker/`.
 
 ## Docs
 

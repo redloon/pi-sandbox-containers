@@ -6,12 +6,15 @@
 # anything. Idempotent and cheap: rsync only copies what changed.
 #
 # Guarantees:
+#   - deletions propagate: the agent dir mirrors pi-home/ exactly, except for the
+#     runtime state listed as rsync exclusions (sessions, installs, …)
 #   - never touches sessions/ (per-sandbox session history lives in the volume)
 #   - never creates auth.json (auth is env-var passthrough by design, see
 #     docs/security.md); actively removes one if it somehow appeared
+#   - never delivers extension files pi cannot load (empty, no exports, symlinks)
 set -euo pipefail
 
-SRC="/opt/pi-home"
+SRC="${PI_HOME_SRC:-/opt/pi-home}"
 DST="${PI_CODING_AGENT_DIR:-/home/pi/.pi/agent}"
 
 [[ -d "$SRC" ]] || exit 0
@@ -24,11 +27,39 @@ if [[ ! -w "$DST" ]]; then
   exit 1
 fi
 
-rsync -a \
+# Last gate before pi: extension files pi cannot load make the whole sandbox
+# fail at startup. The config sync quarantines these at the source; this catches
+# hand-edited overlays too. Skipped loudly, and stale copies are dropped.
+EXT_OPTS=()
+for f in "$SRC"/extensions/*.ts "$SRC"/extensions/*.tsx "$SRC"/extensions/*.js \
+         "$SRC"/extensions/*.jsx "$SRC"/extensions/*.mjs "$SRC"/extensions/*.cjs; do
+  [[ -e "$f" || -L "$f" ]] || continue
+  name="$(basename "$f")"
+  if [[ -L "$f" ]]; then
+    echo "seed-pi-home: WARNING — skipped extensions/$name (symlink would dangle in the sandbox)." >&2
+  elif [[ ! -s "$f" ]] || ! grep -q 'export' "$f"; then
+    echo "seed-pi-home: WARNING — skipped extensions/$name (empty or no exports; pi cannot load it)." >&2
+  else
+    continue
+  fi
+  EXT_OPTS+=("--exclude=/extensions/$name")
+  rm -f "$DST/extensions/$name"
+done
+
+# Deletions propagate: the agent dir mirrors the overlay exactly — except the
+# runtime state below, which lives only in the volume and must survive.
+rsync -a --delete \
   --exclude 'auth.json' \
   --exclude 'sessions/' \
   --exclude 'reviews/' \
+  --exclude 'install/' \
+  --exclude 'models-store.json' \
+  --exclude '.sync-stamp' \
+  ${EXT_OPTS[@]+"${EXT_OPTS[@]}"} \
   "$SRC/" "$DST/"
+
+# Host-side bookkeeping: meaningless inside sandboxes.
+rm -f "$DST/.sync-stamp"
 
 # Belt and braces: credentials on disk are forbidden in sandboxes (auth is
 # env-var passthrough only, see docs/security.md). Pi drops a benign empty

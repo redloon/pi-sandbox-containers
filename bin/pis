@@ -51,10 +51,16 @@ _script="${BASH_SOURCE[0]}"
 while [[ -L "$_script" ]]; do _script="$(readlink "$_script")"; done
 _script_dir="$(cd "$(dirname "$_script")" && pwd)"
 
+# Environment wins over the config file (12-factor precedence; also lets
+# scripts/qa.sh point the tool at throwaway trees).
+_PI_SANDBOX_HOME_ENV="${PI_SANDBOX_HOME:-}"
 CONFIG_FILE="${PI_SANDBOX_CONFIG:-$HOME/.config/pi-sandbox/config}"
 if [[ -f "$CONFIG_FILE" ]]; then
   # shellcheck source=/dev/null
   source "$CONFIG_FILE"
+fi
+if [[ -n "$_PI_SANDBOX_HOME_ENV" ]]; then
+  PI_SANDBOX_HOME="$_PI_SANDBOX_HOME_ENV"
 fi
 if [[ -z "${PI_SANDBOX_HOME:-}" ]]; then
   if [[ -f "$_script_dir/../compose.yaml" ]]; then
@@ -65,11 +71,11 @@ if [[ -z "${PI_SANDBOX_HOME:-}" ]]; then
   fi
 fi
 PI_VERSION="${PI_VERSION:-1.2.0}"
-[[ -f "$PI_SANDBOX_HOME/compose.yaml" ]] || die "no compose.yaml under PI_SANDBOX_HOME=$PI_SANDBOX_HOME"
 
 # Image content stamp: anything under docker/ or a PI_VERSION bump marks images stale.
+# Failure-proof: config-only commands must work against a bare PI_SANDBOX_HOME.
 DOCKER_HASH="$(
-  { (cd "$PI_SANDBOX_HOME" && find docker -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) && printf 'pi-%s\n' "$PI_VERSION"; } \
+  { (cd "$PI_SANDBOX_HOME" 2>/dev/null && find docker -type f -print0 2>/dev/null | LC_ALL=C sort -z | xargs -0 -r sha256sum || true) && printf 'pi-%s\n' "$PI_VERSION"; } \
     | sha256sum | cut -d' ' -f1
 )"
 KVM_GID="$(stat -c '%g' /dev/kvm 2>/dev/null || echo 0)"
@@ -129,6 +135,9 @@ compose() {
 }
 
 need_docker() {
+  [[ -f "$PI_SANDBOX_HOME/compose.yaml" ]] \
+    || die "no compose.yaml under PI_SANDBOX_HOME=$PI_SANDBOX_HOME" \
+           "docker commands need the fleet layout (config-only commands like sync-config do not)"
   command -v docker >/dev/null 2>&1 \
     || die "docker is not installed" "install Docker Engine — pis never runs pi unsandboxed"
   docker info >/dev/null 2>&1 \
@@ -188,9 +197,13 @@ ensure_container() {
 
 # Pi runs with all tools and zero permission prompts (the container IS the
 # boundary). Interactive runs drop into a sandbox shell after pi exits/crashes.
+# seed-pi-home failures are fatal: a half-seeded agent dir is exactly the class
+# of state drift that produces mysterious startup errors (see scripts/qa.sh).
 # shellcheck disable=SC2016  # $@ / $? are expanded inside the container, not here.
-WRAPPER_INTERACTIVE='seed-pi-home >/dev/null 2>&1 || true; pi "$@"; rc=$?; echo; echo "pi exited $rc — sandbox shell (exit to leave)"; exec bash'
-WRAPPER_PLAIN='seed-pi-home >/dev/null 2>&1 || true; exec pi "$@"'
+WRAPPER_SEED='seed-pi-home || { echo "pi-sandbox: config seed failed — see above (pis clean -y resets the volume)" >&2; exit 1; }'
+# shellcheck disable=SC2016  # $@ / $? are expanded inside the container, not here.
+WRAPPER_INTERACTIVE="$WRAPPER_SEED"'; pi "$@"; rc=$?; echo; echo "pi exited $rc — sandbox shell (exit to leave)"; echo "hint: seed-pi-home re-syncs config from pi-home/; pi -ne starts without extensions"; exec bash'
+WRAPPER_PLAIN="$WRAPPER_SEED"'; exec pi "$@"'
 
 run_pi() {
   printf '⬢ %s sandbox · %s\n' "$PROFILE" "$REPO_ROOT" >&2
@@ -455,7 +468,7 @@ do_sync() {
 
   # Resource dirs — mirrored with --delete so host removals propagate there too.
   # Host symlinks are skipped: they would dangle inside containers.
-  local excludes=() link link_name
+  local excludes=() link link_name f_name
   for d in extensions skills prompts themes; do
     [[ -d "$src/$d" ]] || continue
     excludes=()
@@ -469,6 +482,19 @@ do_sync() {
       # Drop any previously mirrored copy of this symlink.
       rm -f "$dst/$d/$link_name"
     done < <(find "$src/$d" -maxdepth 1 -type l -print0 2>/dev/null)
+    if [[ $d == extensions ]]; then
+      # Extensions pi cannot load brick startup for the whole sandbox — skip
+      # them at the source, loudly, instead of letting them through.
+      for f in "$src/$d"/*.ts "$src/$d"/*.tsx "$src/$d"/*.js "$src/$d"/*.jsx "$src/$d"/*.mjs "$src/$d"/*.cjs; do
+        [[ -f "$f" && ! -L "$f" ]] || continue
+        if [[ ! -s "$f" ]] || ! grep -q 'export' "$f"; then
+          f_name="$(basename "$f")"
+          excludes+=("--exclude=/$f_name")
+          rm -f "$dst/$d/$f_name"
+          warn "skipped extensions/$f_name (empty or no exports — pi cannot load it); fix or remove $f"
+        fi
+      done
+    fi
     mkdir -p "$dst/$d"
     out="$(rsync -ai --delete "${excludes[@]}" --exclude '/sandbox.json' --exclude '/.gitkeep' "$src/$d/" "$dst/$d/")" \
       || die "rsync failed for $src/$d"

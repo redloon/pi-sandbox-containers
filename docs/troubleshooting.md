@@ -45,6 +45,23 @@ with `pis doctor`.
 - If a container was started by hand (`docker compose up`), re-seed with
   `pis run -- seed-pi-home`.
 
+## `Failed to load extension "…": Extension does not export a valid factory function`
+
+pi fails fast when an extension file is empty, has no exports, or is a dangling
+symlink — one bad file fails startup for the whole sandbox. Three layers guard
+this class:
+
+1. The config sync quarantines such files at the host source, loudly, before
+   they ever reach `pi-home/`.
+2. `seed-pi-home` re-checks at delivery (catches hand-edited overlays).
+3. Seeds propagate deletions (`rsync --delete`), so stale copies left in old
+   container volumes — the way this error appeared "out of nowhere" — are
+   removed automatically on the next start.
+
+If you see it anyway: run `pis` again (the seed self-heals), start once with
+`pi -ne` to skip extensions, or `pis clean -y` to reset volumes.
+`scripts/qa.sh` regression-tests these invariants.
+
 ## Playwright version mismatch ("browser executable not found")
 
 The web image bakes Chromium for `playwright@latest` at build time. If your

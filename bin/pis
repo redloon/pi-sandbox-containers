@@ -51,8 +51,8 @@ _script="${BASH_SOURCE[0]}"
 while [[ -L "$_script" ]]; do _script="$(readlink "$_script")"; done
 _script_dir="$(cd "$(dirname "$_script")" && pwd)"
 
-# Environment wins over the config file (12-factor precedence; also lets
-# scripts/qa.sh point the tool at throwaway trees).
+# Environment wins over the config file (12-factor precedence; also lets the
+# tests in tests/ point the tool at throwaway trees).
 _PI_SANDBOX_HOME_ENV="${PI_SANDBOX_HOME:-}"
 CONFIG_FILE="${PI_SANDBOX_CONFIG:-$HOME/.config/pi-sandbox/config}"
 if [[ -f "$CONFIG_FILE" ]]; then
@@ -67,7 +67,7 @@ if [[ -z "${PI_SANDBOX_HOME:-}" ]]; then
     PI_SANDBOX_HOME="$(cd "$_script_dir/.." && pwd)"
   else
     die "PI_SANDBOX_HOME is not set and $CONFIG_FILE does not exist" \
-        "run ./install from pi-sandbox-local first"
+      "run ./install from pi-sandbox-local first"
   fi
 fi
 PI_VERSION="${PI_VERSION:-1.2.0}"
@@ -75,8 +75,8 @@ PI_VERSION="${PI_VERSION:-1.2.0}"
 # Image content stamp: anything under docker/ or a PI_VERSION bump marks images stale.
 # Failure-proof: config-only commands must work against a bare PI_SANDBOX_HOME.
 DOCKER_HASH="$(
-  { (cd "$PI_SANDBOX_HOME" 2>/dev/null && find docker -type f -print0 2>/dev/null | LC_ALL=C sort -z | xargs -0 -r sha256sum || true) && printf 'pi-%s\n' "$PI_VERSION"; } \
-    | sha256sum | cut -d' ' -f1
+  { (cd "$PI_SANDBOX_HOME" 2>/dev/null && find docker -type f -print0 2>/dev/null | LC_ALL=C sort -z | xargs -0 -r sha256sum || true) && printf 'pi-%s\n' "$PI_VERSION"; } |
+    sha256sum | cut -d' ' -f1
 )"
 KVM_GID="$(stat -c '%g' /dev/kvm 2>/dev/null || echo 0)"
 
@@ -100,8 +100,8 @@ resolve_context() {
     PROFILE_SOURCE=".pi-sandbox.toml"
   fi
   if [[ -z "$PROFILE" ]]; then
-    if [[ -f "$REPO_ROOT/settings.gradle.kts" || -f "$REPO_ROOT/settings.gradle" \
-       || -f "$REPO_ROOT/build.gradle.kts"  || -f "$REPO_ROOT/build.gradle" ]]; then
+    if [[ -f "$REPO_ROOT/settings.gradle.kts" || -f "$REPO_ROOT/settings.gradle" ||
+      -f "$REPO_ROOT/build.gradle.kts" || -f "$REPO_ROOT/build.gradle" ]]; then
       PROFILE=android
     elif [[ -f "$REPO_ROOT/package.json" ]]; then
       PROFILE=web
@@ -111,7 +111,7 @@ resolve_context() {
     PROFILE_SOURCE="auto-detect"
   fi
   case "$PROFILE" in
-    general|web|android) ;;
+    general | web | android) ;;
     *) die "unknown profile '$PROFILE' (expected: general | web | android)" ;;
   esac
 
@@ -123,34 +123,34 @@ resolve_context() {
 }
 
 compose() {
-  ( cd "$PI_SANDBOX_HOME" && \
+  (cd "$PI_SANDBOX_HOME" &&
     COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" \
-    SANDBOX_WORKDIR="$REPO_ROOT" \
-    KVM_GID="$KVM_GID" \
-    HOST_UID="$(id -u)" \
-    HOST_GID="$(id -g)" \
-    PI_VERSION="$PI_VERSION" \
-    DOCKER_HASH="$DOCKER_HASH" \
-    docker compose "$@" )
+      SANDBOX_WORKDIR="$REPO_ROOT" \
+      KVM_GID="$KVM_GID" \
+      HOST_UID="$(id -u)" \
+      HOST_GID="$(id -g)" \
+      PI_VERSION="$PI_VERSION" \
+      DOCKER_HASH="$DOCKER_HASH" \
+      docker compose "$@")
 }
 
 need_docker() {
-  [[ -f "$PI_SANDBOX_HOME/compose.yaml" ]] \
-    || die "no compose.yaml under PI_SANDBOX_HOME=$PI_SANDBOX_HOME" \
-           "docker commands need the fleet layout (config-only commands like sync-config do not)"
-  command -v docker >/dev/null 2>&1 \
-    || die "docker is not installed" "install Docker Engine — pis never runs pi unsandboxed"
-  docker info >/dev/null 2>&1 \
-    || die "the Docker daemon is not reachable" \
-           "start it (e.g. sudo systemctl start docker) and retry — pis never runs pi unsandboxed"
-  docker compose version >/dev/null 2>&1 \
-    || die "docker compose v2 is missing" "install the docker-compose-plugin package"
+  [[ -f "$PI_SANDBOX_HOME/compose.yaml" ]] ||
+    die "no compose.yaml under PI_SANDBOX_HOME=$PI_SANDBOX_HOME" \
+      "docker commands need the fleet layout (config-only commands like sync-config do not)"
+  command -v docker >/dev/null 2>&1 ||
+    die "docker is not installed" "install Docker Engine — pis never runs pi unsandboxed"
+  docker info >/dev/null 2>&1 ||
+    die "the Docker daemon is not reachable" \
+      "start it (e.g. sudo systemctl start docker) and retry — pis never runs pi unsandboxed"
+  docker compose version >/dev/null 2>&1 ||
+    die "docker compose v2 is missing" "install the docker-compose-plugin package"
 }
 
 auth_missing() {
   if [[ -n "${XIAOMI_TOKEN_PLAN_SGP_API_KEY:-}" ]]; then return 1; fi
-  if [[ -f "$PI_SANDBOX_HOME/.env" ]] \
-     && grep -qE '^[[:space:]]*XIAOMI_TOKEN_PLAN_SGP_API_KEY=..*' "$PI_SANDBOX_HOME/.env"; then
+  if [[ -f "$PI_SANDBOX_HOME/.env" ]] &&
+    grep -qE '^[[:space:]]*XIAOMI_TOKEN_PLAN_SGP_API_KEY=..*' "$PI_SANDBOX_HOME/.env"; then
     return 1
   fi
   return 0
@@ -159,18 +159,18 @@ auth_missing() {
 require_auth() {
   if auth_missing; then
     die "XIAOMI_TOKEN_PLAN_SGP_API_KEY is not configured" \
-        "add it to $PI_SANDBOX_HOME/.env (see .env.example) or export it; ./install seeds it from ~/.pi/agent/auth.json"
+      "add it to $PI_SANDBOX_HOME/.env (see .env.example) or export it; ./install seeds it from ~/.pi/agent/auth.json"
   fi
 }
 
 ensure_kvm() {
   if [[ "$PROFILE" != android ]]; then return 0; fi
-  [[ -c /dev/kvm ]] \
-    || die "/dev/kvm does not exist — the android sandbox needs hardware virtualization" \
-           "enable VT-x/AMD-V in firmware and load the kvm module"
+  [[ -c /dev/kvm ]] ||
+    die "/dev/kvm does not exist — the android sandbox needs hardware virtualization" \
+      "enable VT-x/AMD-V in firmware and load the kvm module"
   if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
     die "no read/write access to /dev/kvm" \
-        "sudo usermod -aG kvm \$USER (re-login), or: sudo setfacl -m u:\$USER:rw /dev/kvm"
+      "sudo usermod -aG kvm \$USER (re-login), or: sudo setfacl -m u:\$USER:rw /dev/kvm"
   fi
 }
 
@@ -198,7 +198,8 @@ ensure_container() {
 # Pi runs with all tools and zero permission prompts (the container IS the
 # boundary). Interactive runs drop into a sandbox shell after pi exits/crashes.
 # seed-pi-home failures are fatal: a half-seeded agent dir is exactly the class
-# of state drift that produces mysterious startup errors (see scripts/qa.sh).
+# of state drift that produces mysterious startup errors (see tests/, run via
+# scripts/check.sh).
 # shellcheck disable=SC2016  # $@ / $? are expanded inside the container, not here.
 WRAPPER_SEED='seed-pi-home || { echo "pi-sandbox: config seed failed — see above (pis clean -y resets the volume)" >&2; exit 1; }'
 # shellcheck disable=SC2016  # $@ / $? are expanded inside the container, not here.
@@ -262,9 +263,12 @@ cmd_status() {
   printf 'project:   %s\n' "$COMPOSE_PROJECT_NAME"
   local have state
   have="$(docker image inspect "pi-sandbox:$PROFILE" --format '{{index .Config.Labels "org.pi-sandbox.dockerhash"}}' 2>/dev/null || true)"
-  if [[ -z "$have" ]]; then state=missing
-  elif [[ "$have" == "$DOCKER_HASH" ]]; then state=ok
-  else state=stale
+  if [[ -z "$have" ]]; then
+    state=missing
+  elif [[ "$have" == "$DOCKER_HASH" ]]; then
+    state=ok
+  else
+    state=stale
   fi
   printf 'image:     pi-sandbox:%s → %s\n' "$PROFILE" "$state"
   if auth_missing; then
@@ -292,15 +296,21 @@ cmd_doctor() {
       *) die "doctor: unknown option $a" ;;
     esac
   done
-  ok()   { printf '  ✓ %s\n' "$*"; }
-  bad()  { printf '  ✗ %s\n' "$*"; fail=1; }
+  ok() { printf '  ✓ %s\n' "$*"; }
+  bad() {
+    printf '  ✗ %s\n' "$*"
+    fail=1
+  }
   soft() { printf '  ! %s\n' "$*"; }
 
-  if command -v docker >/dev/null 2>&1; then ok "docker CLI ($(docker --version 2>/dev/null | head -1))"
+  if command -v docker >/dev/null 2>&1; then
+    ok "docker CLI ($(docker --version 2>/dev/null | head -1))"
   else bad "docker CLI missing"; fi
-  if docker info >/dev/null 2>&1; then ok "docker daemon reachable"
+  if docker info >/dev/null 2>&1; then
+    ok "docker daemon reachable"
   else bad "docker daemon not reachable — start Docker and retry (pis never falls back to host pi)"; fi
-  if docker compose version >/dev/null 2>&1; then ok "$(docker compose version --short 2>/dev/null | sed 's/^/docker compose v/')"
+  if docker compose version >/dev/null 2>&1; then
+    ok "$(docker compose version --short 2>/dev/null | sed 's/^/docker compose v/')"
   else bad "docker compose v2 missing"; fi
 
   if auth_missing; then
@@ -326,9 +336,12 @@ cmd_doctor() {
   local p have
   for p in general web android; do
     have="$(docker image inspect "pi-sandbox:$p" --format '{{index .Config.Labels "org.pi-sandbox.dockerhash"}}' 2>/dev/null || true)"
-    if [[ -z "$have" ]]; then soft "image pi-sandbox:$p not built yet (auto-builds on first use)"
-    elif [[ "$have" == "$DOCKER_HASH" ]]; then ok "image pi-sandbox:$p up to date"
-    else soft "image pi-sandbox:$p is stale (auto-rebuilds on next use, or: pis rebuild $p)"
+    if [[ -z "$have" ]]; then
+      soft "image pi-sandbox:$p not built yet (auto-builds on first use)"
+    elif [[ "$have" == "$DOCKER_HASH" ]]; then
+      ok "image pi-sandbox:$p up to date"
+    else
+      soft "image pi-sandbox:$p is stale (auto-rebuilds on next use, or: pis rebuild $p)"
     fi
   done
 
@@ -339,9 +352,13 @@ cmd_doctor() {
     ensure_image "$PROFILE"
     ensure_container
     local out
-    out="$(compose exec -T "$PROFILE" bash -lc "$WRAPPER_PLAIN" pis-sh -p 'Reply with exactly: OK' 2>&1)" \
-      || { printf '%s\n' "$out" >&2; bad "smoke test: pi failed to run"; }
-    if [[ "${out:-}" == *OK* ]]; then ok "smoke test: pi answered inside the sandbox"
+    out="$(compose exec -T "$PROFILE" bash -lc "$WRAPPER_PLAIN" pis-sh -p 'Reply with exactly: OK' 2>&1)" ||
+      {
+        printf '%s\n' "$out" >&2
+        bad "smoke test: pi failed to run"
+      }
+    if [[ "${out:-}" == *OK* ]]; then
+      ok "smoke test: pi answered inside the sandbox"
     else bad "smoke test: unexpected answer: ${out:-<empty>}"; fi
   fi
 
@@ -358,7 +375,7 @@ cmd_rebuild() {
   local targets=() t
   for a in "$@"; do
     case "$a" in
-      general|web|android) targets+=("$a") ;;
+      general | web | android) targets+=("$a") ;;
       all) targets+=(general web android) ;;
       *) die "rebuild: unknown target '$a' (expected: general | web | android | all)" ;;
     esac
@@ -387,7 +404,7 @@ cmd_clean() {
   local yes=0
   for a in "$@"; do
     case "$a" in
-      -y|--yes) yes=1 ;;
+      -y | --yes) yes=1 ;;
       *) die "clean: unknown option $a (destructive — requires -y)" ;;
     esac
   done
@@ -414,12 +431,15 @@ cmd_clean() {
 
 sync_source_stamp() {
   local src="${PI_AGENT_DIR:-$HOME/.pi/agent}"
-  [[ -d "$src" ]] || { echo "no-source"; return 0; }
-  ( cd "$src" && find . -maxdepth 3 \
-      \( -path './sessions' -o -path './reviews' -o -path './install' -o -path './bin' \
-         -o -path './npm/node_modules' -o -name 'auth.json' -o -name 'models-store.json' \) -prune \
-      -o \( -type f -printf 'f %p %T@ %s\n' -o -type l -printf 'l %p %l\n' \) \
-      2>/dev/null | LC_ALL=C sort | sha256sum | cut -d' ' -f1 )
+  [[ -d "$src" ]] || {
+    echo "no-source"
+    return 0
+  }
+  (cd "$src" && find . -maxdepth 3 \
+    \( -path './sessions' -o -path './reviews' -o -path './install' -o -path './bin' \
+    -o -path './npm/node_modules' -o -name 'auth.json' -o -name 'models-store.json' \) -prune \
+    -o \( -type f -printf 'f %p %T@ %s\n' -o -type l -printf 'l %p %l\n' \) \
+    2>/dev/null | LC_ALL=C sort | sha256sum | cut -d' ' -f1)
 }
 
 SYNC_CHANGED=()
@@ -442,7 +462,7 @@ do_sync() {
        elif .packages then (.packages |= map(select(. != "npm:pi-sbx")))
        else . end)
       | .defaultProjectTrust = "always"
-    ' "$src/settings.json" > "$tmp"
+    ' "$src/settings.json" >"$tmp"
     if [[ ! -f "$dst/settings.json" ]] || ! cmp -s "$tmp" "$dst/settings.json"; then
       mv "$tmp" "$dst/settings.json"
       SYNC_CHANGED+=("settings.json")
@@ -496,22 +516,22 @@ do_sync() {
       done
     fi
     mkdir -p "$dst/$d"
-    out="$(rsync -ai --delete "${excludes[@]}" --exclude '/sandbox.json' --exclude '/.gitkeep' "$src/$d/" "$dst/$d/")" \
-      || die "rsync failed for $src/$d"
+    out="$(rsync -ai --delete "${excludes[@]}" --exclude '/sandbox.json' --exclude '/.gitkeep' "$src/$d/" "$dst/$d/")" ||
+      die "rsync failed for $src/$d"
     if [[ -n "$out" ]]; then SYNC_CHANGED+=("$d/"); fi
   done
 
   # npm/ pre-warm (mirrored; package.json written separately, minus pi-sbx).
   if [[ $no_npm == 0 && -d "$src/npm" ]]; then
-    out="$(rsync -ai --delete --exclude '/package.json' "$src/npm/" "$dst/npm/")" \
-      || die "rsync failed for $src/npm"
+    out="$(rsync -ai --delete --exclude '/package.json' "$src/npm/" "$dst/npm/")" ||
+      die "rsync failed for $src/npm"
     if [[ -n "$out" ]]; then SYNC_CHANGED+=("npm/"); fi
     if [[ -f "$src/npm/package.json" ]]; then
       tmp="$(mktemp)"
       if [[ $keep_pi_sbx == 1 ]]; then
         cp "$src/npm/package.json" "$tmp"
       else
-        jq 'del(.dependencies["pi-sbx"], .devDependencies["pi-sbx"])' "$src/npm/package.json" > "$tmp"
+        jq 'del(.dependencies["pi-sbx"], .devDependencies["pi-sbx"])' "$src/npm/package.json" >"$tmp"
       fi
       if [[ ! -f "$dst/npm/package.json" ]] || ! cmp -s "$tmp" "$dst/npm/package.json"; then
         mv "$tmp" "$dst/npm/package.json"
@@ -525,9 +545,11 @@ do_sync() {
   # AGENTS.md is user-curated — only replaced on explicit request.
   if [[ $with_agents == 1 ]]; then
     if [[ -f "$src/AGENTS.override.md" ]]; then
-      cp -f "$src/AGENTS.override.md" "$dst/AGENTS.md"; SYNC_CHANGED+=("AGENTS.md")
+      cp -f "$src/AGENTS.override.md" "$dst/AGENTS.md"
+      SYNC_CHANGED+=("AGENTS.md")
     elif [[ -f "$src/AGENTS.md" ]]; then
-      cp -f "$src/AGENTS.md" "$dst/AGENTS.md"; SYNC_CHANGED+=("AGENTS.md")
+      cp -f "$src/AGENTS.md" "$dst/AGENTS.md"
+      SYNC_CHANGED+=("AGENTS.md")
     elif [[ $quiet == 0 ]]; then
       warn "host has no AGENTS.md — keeping the curated pi-home/AGENTS.md"
     fi
@@ -544,12 +566,12 @@ auto_sync() {
   [[ -d "$src" ]] || return 0
   local stamp
   stamp="$(sync_source_stamp)"
-  if [[ -f "$PI_SANDBOX_HOME/pi-home/.sync-stamp" ]] \
-     && [[ "$(<"$PI_SANDBOX_HOME/pi-home/.sync-stamp")" == "$stamp" ]]; then
+  if [[ -f "$PI_SANDBOX_HOME/pi-home/.sync-stamp" ]] &&
+    [[ "$(<"$PI_SANDBOX_HOME/pi-home/.sync-stamp")" == "$stamp" ]]; then
     return 0
   fi
   do_sync 1 0 0 0
-  printf '%s' "$stamp" > "$PI_SANDBOX_HOME/pi-home/.sync-stamp"
+  printf '%s' "$stamp" >"$PI_SANDBOX_HOME/pi-home/.sync-stamp"
   if [[ ${#SYNC_CHANGED[@]} -gt 0 ]]; then
     note "pi config synced from host: ${SYNC_CHANGED[*]}"
   fi
@@ -566,7 +588,7 @@ cmd_sync_config() {
     esac
   done
   do_sync 0 "$with_agents" "$keep_pi_sbx" "$no_npm"
-  printf '%s' "$(sync_source_stamp)" > "$PI_SANDBOX_HOME/pi-home/.sync-stamp"
+  printf '%s' "$(sync_source_stamp)" >"$PI_SANDBOX_HOME/pi-home/.sync-stamp"
   note "sync complete → $PI_SANDBOX_HOME/pi-home (changed: ${SYNC_CHANGED[*]:-none})"
 }
 
@@ -581,21 +603,54 @@ cmd_host() {
 # -------------------------------------------------------------------- main -- #
 main() {
   case "${1:-}" in
-    "")            cmd_pi "$@" ;;
-    --)            shift; cmd_pi "$@" ;;
-    --host)        shift; cmd_host "$@" ;;
-    run)           shift; cmd_run "$@" ;;
-    shell)         shift; cmd_shell "$@" ;;
-    logs)          shift; cmd_logs "$@" ;;
-    status)        shift; cmd_status "$@" ;;
-    doctor)        shift; cmd_doctor "$@" ;;
-    rebuild)       shift; cmd_rebuild "$@" ;;
-    down)          shift; cmd_down "$@" ;;
-    clean)         shift; cmd_clean "$@" ;;
-    sync-config)   shift; cmd_sync_config "$@" ;;
-    help|-h|--help) usage ;;
-    --version)     printf 'pis %s\n' "$PIS_VERSION" ;;
-    *)             cmd_pi "$@" ;;
+    "") cmd_pi "$@" ;;
+    --)
+      shift
+      cmd_pi "$@"
+      ;;
+    --host)
+      shift
+      cmd_host "$@"
+      ;;
+    run)
+      shift
+      cmd_run "$@"
+      ;;
+    shell)
+      shift
+      cmd_shell "$@"
+      ;;
+    logs)
+      shift
+      cmd_logs "$@"
+      ;;
+    status)
+      shift
+      cmd_status "$@"
+      ;;
+    doctor)
+      shift
+      cmd_doctor "$@"
+      ;;
+    rebuild)
+      shift
+      cmd_rebuild "$@"
+      ;;
+    down)
+      shift
+      cmd_down "$@"
+      ;;
+    clean)
+      shift
+      cmd_clean "$@"
+      ;;
+    sync-config)
+      shift
+      cmd_sync_config "$@"
+      ;;
+    help | -h | --help) usage ;;
+    --version) printf 'pis %s\n' "$PIS_VERSION" ;;
+    *) cmd_pi "$@" ;;
   esac
 }
 

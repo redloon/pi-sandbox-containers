@@ -1,0 +1,10 @@
+# Tool pins for developing pi-sandbox-local itself (gate: scripts/check.sh).
+#
+# Installed machine-wide (MISE_DATA_DIR), so one install serves every repo;
+# this file is configuration only. scripts/check.sh resolves tools
+# system-first and only falls back to these pins — run `scripts/check.sh
+# --pinned` (or CHECK_PREFER=mise) to force the exact versions below.
+[tools]
+shellcheck = "0.11.0"
+shfmt = "3.14.1"
+bats = "1.14.0"

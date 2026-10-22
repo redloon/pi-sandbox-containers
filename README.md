@@ -93,11 +93,24 @@ through to pi (e.g. a prompt literally named "shell").
   the state intact; `pis shell` / `pis logs` work any time afterwards.
 - **Workspaces**: each repo is bind-mounted read-write at `/workspace` (and
   nothing else from your home directory is visible).
-- **Invariants, regression-tested**: `scripts/qa.sh` runs hermetic checks that
-  config deletions propagate at every layer (host → `pi-home/` → container
-  volume), junk extension files are quarantined before they can break pi
-  startup, and credentials never reach disk. Run it after touching `bin/pis`
-  or `docker/`.
+- **Invariants, regression-tested**: the bats suite in `tests/` (run via
+  `scripts/check.sh`) guards that config deletions propagate at every layer
+  (host → `pi-home/` → container volume), junk extension files are quarantined
+  before they can break pi startup, and credentials never reach disk.
+
+## Development & testing
+
+One command gates every change:
+
+```bash
+scripts/check.sh          # shellcheck + shfmt + the hermetic bats suite (tests/)
+scripts/check.sh --slow   # …plus the Docker tier: pis doctor --smoke + lifecycle
+```
+
+`scripts/qa.sh` is a compatibility wrapper for the same gate. Tool versions are
+pinned in `mise.toml`, but system binaries win when present (`--pinned` forces
+the pins); `./install` runs a non-fatal `mise install`. See `AGENTS.md` for the
+invariants the suite protects and how to add a case.
 
 ## Docs
 

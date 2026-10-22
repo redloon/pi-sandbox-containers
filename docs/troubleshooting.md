@@ -60,7 +60,7 @@ this class:
 
 If you see it anyway: run `pis` again (the seed self-heals), start once with
 `pi -ne` to skip extensions, or `pis clean -y` to reset volumes.
-`scripts/qa.sh` regression-tests these invariants.
+The bats suite in `tests/` regression-tests these invariants (`scripts/check.sh`).
 
 ## Playwright version mismatch ("browser executable not found")
 

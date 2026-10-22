@@ -32,7 +32,7 @@ fi
 # hand-edited overlays too. Skipped loudly, and stale copies are dropped.
 EXT_OPTS=()
 for f in "$SRC"/extensions/*.ts "$SRC"/extensions/*.tsx "$SRC"/extensions/*.js \
-         "$SRC"/extensions/*.jsx "$SRC"/extensions/*.mjs "$SRC"/extensions/*.cjs; do
+  "$SRC"/extensions/*.jsx "$SRC"/extensions/*.mjs "$SRC"/extensions/*.cjs; do
   [[ -e "$f" || -L "$f" ]] || continue
   name="$(basename "$f")"
   if [[ -L "$f" ]]; then

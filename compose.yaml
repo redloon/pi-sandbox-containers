@@ -1,4 +1,4 @@
-# pi-sandbox-local — Docker Compose fleet for sandboxed pi.
+# pi-sandbox-containers — Docker Compose fleet for sandboxed pi.
 #
 # Normally driven by `pis` (bin/pis), which exports the interpolation vars below:
 #   SANDBOX_WORKDIR  host repo bind-mounted at /workspace (required)

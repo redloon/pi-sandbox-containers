@@ -1,4 +1,4 @@
-# Tool pins for developing pi-sandbox-local itself (gate: scripts/check.sh).
+# Tool pins for developing pi-sandbox-containers itself (gate: scripts/check.sh).
 #
 # Installed machine-wide (MISE_DATA_DIR), so one install serves every repo;
 # this file is configuration only. scripts/check.sh resolves tools

@@ -1,4 +1,4 @@
-# AGENTS.md — developing pi-sandbox-local
+# AGENTS.md — developing pi-sandbox-containers
 
 Standing instructions for agents (and humans) working **on this repo**.
 This is not the sandbox instruction file: `pi-home/AGENTS.md` governs work

@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Shared fixtures for the pi-sandbox-local hermetic test suite (tests/*.bats).
+# Shared fixtures for the pi-sandbox-containers hermetic test suite (tests/*.bats).
 #
 # Every case runs against a throwaway tree; the seams are the same env vars
 # the real tools honor (see bin/pis and docker/seed-pi-home):

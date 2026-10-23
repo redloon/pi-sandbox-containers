@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pis — run pi inside a Docker sandbox (pi-sandbox-local).
+# pis — run pi inside a Docker sandbox (pi-sandbox-containers).
 #
 # The everyday command: from any work repo, `pis` finds the repo root, picks the
 # right sandbox profile, builds the image if missing/stale, starts or reuses the
@@ -21,7 +21,7 @@ warn() { printf '! %s\n' "$*" >&2; }
 
 usage() {
   cat <<'EOF'
-pis — run pi inside a Docker sandbox (pi-sandbox-local)
+pis — run pi inside a Docker sandbox (pi-sandbox-containers)
 
 Usage:
   pis [pi args…]            run pi in this repo's sandbox (e.g. pis -p "task")
@@ -59,7 +59,7 @@ passed per exec. Keyless providers: PI_SANDBOX_ALLOW_NO_AUTH=1.
 EOF
 }
 
-# ------------------------------------------------- resolve pi-sandbox-local --
+# ------------------------------------------------- resolve pi-sandbox-containers --
 _script="${BASH_SOURCE[0]}"
 while [[ -L "$_script" ]]; do _script="$(readlink "$_script")"; done
 _script_dir="$(cd "$(dirname "$_script")" && pwd)"
@@ -80,7 +80,7 @@ if [[ -z "${PI_SANDBOX_HOME:-}" ]]; then
     PI_SANDBOX_HOME="$(cd "$_script_dir/.." && pwd)"
   else
     die "PI_SANDBOX_HOME is not set and $CONFIG_FILE does not exist" \
-      "run ./install from pi-sandbox-local first"
+      "run ./install from pi-sandbox-containers first"
   fi
 fi
 PI_VERSION="${PI_VERSION:-1.2.0}"

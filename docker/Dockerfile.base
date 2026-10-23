@@ -56,7 +56,7 @@ RUN curl -fsSL https://mise.run | sh \
  && npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@${PI_VERSION}" \
  && /home/pi/.local/bin/mise reshim \
  && printf '%s\n' 'eval "$(/home/pi/.local/bin/mise activate bash)"' >> /home/pi/.bashrc \
- && printf '%s\n' 'export PI_SANDBOX_NOTICE="pi runs inside a Docker sandbox (pi-sandbox-local)"' >> /home/pi/.bashrc
+ && printf '%s\n' 'export PI_SANDBOX_NOTICE="pi runs inside a Docker sandbox (pi-sandbox-containers)"' >> /home/pi/.bashrc
 
 # Baked into the image so the entrypoint can keep the mise data volume in sync
 # with the image's pi version (named volumes seed from the image only once).

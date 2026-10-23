@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install — one-time setup for pi-sandbox-local. Idempotent: safe to re-run.
+# install — one-time setup for pi-sandbox-containers. Idempotent: safe to re-run.
 #
 #   ./install              install pis, seed .env, run checks, build images
 #   ./install --no-build   skip image builds (pis auto-builds on first use anyway)
@@ -44,7 +44,7 @@ echo "• config → $CONFIG_FILE (PI_VERSION=$PI_VERSION)"
 # --- 3. PATH -----------------------------------------------------------------
 if ! grep -qs '\.local/bin' "$HOME/.bashrc"; then
   # shellcheck disable=SC2016  # literal $HOME/$PATH must land in .bashrc unexpanded.
-  printf '\n# pis (pi-sandbox-local)\nexport PATH="$HOME/.local/bin:$PATH"\n' >>"$HOME/.bashrc"
+  printf '\n# pis (pi-sandbox-containers)\nexport PATH="$HOME/.local/bin:$PATH"\n' >>"$HOME/.bashrc"
   echo "• added ~/.local/bin to PATH in ~/.bashrc (open a new shell or: source ~/.bashrc)"
 fi
 

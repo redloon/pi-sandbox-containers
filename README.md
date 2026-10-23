@@ -1,4 +1,4 @@
-# pi-sandbox-local
+# pi-sandbox-containers
 
 Run **pi unattended inside Docker sandboxes** with a safe security boundary — and
 almost no friction. The everyday command is just:
@@ -21,7 +21,7 @@ boundary is real.
 ## Setup (once)
 
 ```bash
-cd ~/work/pi-sandbox-local
+cd ~/work/pi-sandbox-containers
 ./install
 ```
 

@@ -1,6 +1,6 @@
 # Sandbox operating instructions
 
-These instructions apply to every pi sandbox started with `pis` (pi-sandbox-local marker).
+These instructions apply to every pi sandbox started with `pis` (pi-sandbox-containers marker).
 They are the user-level AGENTS.md from the sandbox agent directory; project AGENTS.md
 files in `/workspace` layer on top and take precedence for project-specific detail.
 

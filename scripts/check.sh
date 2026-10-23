@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check.sh — the test gate for pi-sandbox-local. Run it before declaring any
+# check.sh — the test gate for pi-sandbox-containers. Run it before declaring any
 # change done (see AGENTS.md at the repo root).
 #
 #   scripts/check.sh             lint + fast hermetic bats suite (no Docker)

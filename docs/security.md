@@ -15,7 +15,7 @@ What crosses the boundary, by design:
 | `/workspace` bind mount | read-write | the working repo only; writes sync to the host |
 | provider credentials (every var in `.env`, any `*_API_KEY`) | env in | the `.env` passthrough contract — process environment inside the sandbox; never written to disk there |
 | host `*_API_KEY` / `PI_SANDBOX_EXTRA_ENV` vars | env in (per exec) | passed as `compose exec -e NAME` on each exec; values are never in argv and the keep-alive container itself never holds them |
-| `pi-home/.env` visibility | only when this repo is the workspace | the `.env` file is bind-mounted along with `/workspace` **only** when you run `pis` inside pi-sandbox-local itself (as in the self-tests); for any other repo it is not mounted. Prefer keeping long-lived secrets out of repos you open in sandboxes. |
+| `pi-home/.env` visibility | only when this repo is the workspace | the `.env` file is bind-mounted along with `/workspace` **only** when you run `pis` inside pi-sandbox-containers itself (as in the self-tests); for any other repo it is not mounted. Prefer keeping long-lived secrets out of repos you open in sandboxes. |
 | Network egress | out | required for your model provider's API, npm, mise, Gradle, SDK downloads |
 | pi-home overlay | read-only in | your settings/AGENTS.md/skills, re-seeded per start |
 | `~/Android/Sdk` bind mount (android profile, `PI_SANDBOX_ANDROID_SDK`) | read-only in | the Android toolchain (SDK, emulator, system image); pure tooling — no credentials live there and the sandbox cannot write to it |

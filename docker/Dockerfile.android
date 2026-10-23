@@ -8,12 +8,14 @@
 # mid-build), and lets PATH/ANDROID_HOME below point at the well-known
 # /opt/android-sdk location regardless of the host path.
 #
-# Tuned for ~/work/personal-crm's test flow (scripts/run-tests.sh):
-#   - AVD `pixel_6_api_34` is pre-created at container start (docker/entrypoint.sh)
-#     from system-images;android-34;google_apis;x86_64 — exactly what
-#     ensure-emulator.sh falls back to creating
-#   - the mounted SDK carries platforms;android-36 + build-tools;36.0.0 for
-#     compileSdk 36 / AGP 9
+# Tuned for Android test flows (e.g. scripts/run-tests.sh in the target repo):
+#   - the AVD is pre-created at container start (docker/entrypoint.sh) — name
+#     and system image come from PI_SANDBOX_AVD_NAME /
+#     PI_SANDBOX_ANDROID_SYSTEM_IMAGE (compose.yaml), defaulting to
+#     `pixel_6_api_34` and system-images;android-34;google_apis;x86_64 — the
+#     same AVD a repo's ensure-emulator.sh would fall back to creating
+#   - the mounted SDK carries the default project components (platforms;android-36,
+#     build-tools;36.0.0 — configurable via sdk_components / .pi-sandbox.toml)
 #   - JDK 21 via mise (Gradle 9.x requires JVM 17+)
 #   - emulator runs headless (-no-window -gpu swiftshader_indirect) on /dev/kvm,
 #     passed through by compose with the host's kvm group

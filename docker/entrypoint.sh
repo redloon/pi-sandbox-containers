@@ -29,12 +29,17 @@ fi
 # Android profile: the SDK is a read-only host mount at /opt/android-sdk, so the
 # AVD cannot be baked into the image at build time. Create it on first start
 # (idempotent) so the app repo's ensure-emulator.sh finds it ready — the same
-# AVD that script would fall back to creating.
-if [[ -d /opt/android-sdk/system-images/android-34/google_apis/x86_64 ]] &&
-  ! emulator -list-avds 2>/dev/null | grep -qx 'pixel_6_api_34'; then
-  echo no | avdmanager create avd -n pixel_6_api_34 \
-    -k "system-images;android-34;google_apis;x86_64" --force >/dev/null 2>&1 ||
-    echo "entrypoint: warning: could not pre-create AVD pixel_6_api_34 (ensure-emulator.sh retries)" >&2
+# AVD that script would fall back to creating. Name and system image are
+# configurable (compose.yaml passes PI_SANDBOX_AVD_NAME /
+# PI_SANDBOX_ANDROID_SYSTEM_IMAGE, resolved from env / .pi-sandbox.toml).
+AVD_NAME="${PI_SANDBOX_AVD_NAME:-pixel_6_api_34}"
+SYSTEM_IMAGE="${PI_SANDBOX_ANDROID_SYSTEM_IMAGE:-system-images;android-34;google_apis;x86_64}"
+SYSTEM_IMAGE_DIR="${SYSTEM_IMAGE//;//}"
+if [[ -d "/opt/android-sdk/$SYSTEM_IMAGE_DIR" ]] &&
+  ! emulator -list-avds 2>/dev/null | grep -qx "$AVD_NAME"; then
+  echo no | avdmanager create avd -n "$AVD_NAME" \
+    -k "$SYSTEM_IMAGE" --force >/dev/null 2>&1 ||
+    echo "entrypoint: warning: could not pre-create AVD $AVD_NAME (ensure-emulator.sh retries)" >&2
 fi
 
 # Startup work is done — execs may now rely on the prepared sandbox state.

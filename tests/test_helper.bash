@@ -8,6 +8,7 @@
 #   PI_HOME_SRC          seed source (defaults to the overlay)
 #   PI_CODING_AGENT_DIR  pretend container agent dir (seed destination)
 #   PI_SANDBOX_CONFIG    points at a nonexistent file (never the real config)
+#   PI_SANDBOX_GIT_HOME  pretend host git home (bind-mount source)
 #
 # Nothing here touches real host or sandbox state.
 
@@ -27,7 +28,9 @@ make_tree() {
   export PI_SANDBOX_CONFIG="$TEST_TMP/no-such-config"
   export PI_SANDBOX_GIT_HOME="$TEST_TMP/git-home"
   export PI_SANDBOX_NO_SYNC=1
-  unset PI_SANDBOX_PROFILE PI_VERSION XIAOMI_TOKEN_PLAN_SGP_API_KEY \
+  unset PI_SANDBOX_PROFILE PI_VERSION PI_SANDBOX_EXTRA_ENV PI_SANDBOX_ALLOW_NO_AUTH \
+    PI_SANDBOX_ANDROID_SDK_COMPONENTS PI_SANDBOX_AVD_NAME PI_SANDBOX_ANDROID_SYSTEM_IMAGE \
+    XIAOMI_TOKEN_PLAN_SGP_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY \
     PI_SANDBOX_ANDROID_SDK
   mkdir -p "$PI_SANDBOX_HOME" "$PI_AGENT_DIR/extensions" "$PI_AGENT_DIR/npm" \
     "$PI_CODING_AGENT_DIR/extensions" "$PI_SANDBOX_GIT_HOME"
@@ -56,7 +59,7 @@ make_shims() {
   export FAKE_DOCKER_DUMP="$TEST_TMP/docker-hash-dump"
   mkdir -p "$SHIM_TOOLS" "$SHIM_DOCKER"
   local t
-  for t in bash basename cat cmp cp cut dirname find grep head id jq mkdir mktemp \
+  for t in bash basename cat cmp cp cut dirname find grep head id jq ln mkdir mktemp \
     mv readlink rm rsync sed sha256sum stat sort tail touch tr xargs; do
     ln -s "$(command -v "$t")" "$SHIM_TOOLS/$t"
   done
@@ -89,10 +92,16 @@ case "${1:-}" in
     ;;
   compose)
     case "${2:-}" in
-      version) echo "2.0.0-testdouble" ;;
+      version) echo "${FAKE_COMPOSE_VERSION:-2.31.0-testdouble}" ;;
       *)
         if [[ "${FAKE_DOCKER_DUMP+x}" == x ]]; then
           printf '%s\n' "${DOCKER_HASH:-}" > "$FAKE_DOCKER_DUMP"
+        fi
+        if [[ "${FAKE_DOCKER_ENV_DUMP+x}" == x ]]; then
+          {
+            printf 'PI_SANDBOX_AVD_NAME=%s\n' "${PI_SANDBOX_AVD_NAME:-}"
+            printf 'PI_SANDBOX_ANDROID_SYSTEM_IMAGE=%s\n' "${PI_SANDBOX_ANDROID_SYSTEM_IMAGE:-}"
+          } > "$FAKE_DOCKER_ENV_DUMP"
         fi
         # The ready-marker probe is infrastructure, not a user command: it
         # always answers "ready" so FAKE_EXEC_RC keeps modelling user execs.

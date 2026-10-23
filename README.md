@@ -4,15 +4,15 @@ Run **pi unattended inside Docker sandboxes** with a safe security boundary — 
 almost no friction. The everyday command is just:
 
 ```bash
-cd ~/work/personal-crm   # any work repo
-pis                      # sandboxed pi, straight away
+cd ~/work/my-app          # any work repo
+pis                       # sandboxed pi, straight away
 ```
 
 `pis` finds the repo root, auto-picks the right sandbox profile, builds the image
 if it's missing or stale, starts (or reuses) a keep-alive container, and runs pi
 inside it with all arguments passed through — `pis -p "task"` for unattended
 one-shots, `pis --continue` to resume, exactly like local `pi`. One quiet notice
-line (`⬢ android sandbox · /home/you/work/personal-crm`), then pi owns the terminal.
+line (`⬢ android sandbox · /home/you/work/my-app`), then pi owns the terminal.
 
 If anything in that chain fails — Docker down, build broken — `pis` **hard-errors
 with a fix hint and never falls back to host pi**. Whenever `pis` runs, the
@@ -25,16 +25,17 @@ cd ~/work/pi-sandbox-local
 ./install
 ```
 
-This installs `pis` into `~/.local/bin`, seeds `.env` with your
-`XIAOMI_TOKEN_PLAN_SGP_API_KEY` from `~/.pi/agent/auth.json` (value never
-printed), runs `pis doctor`, and builds the images. Idempotent — re-run after
-pulling changes.
+This installs `pis` into `~/.local/bin`, seeds `.env` with your provider's
+credential vars from `~/.pi/agent/auth.json` (one `<provider>_API_KEY` per
+entry, values never printed), runs `pis doctor`, and builds the images.
+Idempotent — re-run after pulling changes. Requires Docker Compose ≥ 2.24 (the
+`.env` passthrough uses the long-form `env_file`; `pis doctor` checks this).
 
 ## Sandbox profiles
 
 | Profile | Auto-detected when the repo has | Contains |
 |---|---|---|
-| `android` | `settings.gradle.kts` / `build.gradle[.kts]` | everything below + JDK 21 (mise) + the host's Android SDK (mounted read-only) + headless emulator (AVD `pixel_6_api_34`, KVM-accelerated) |
+| `android` | `settings.gradle.kts` / `build.gradle[.kts]` | everything below + JDK 21 (mise) + the host's Android SDK (mounted read-only) + headless emulator (AVD `pixel_6_api_34` by default, KVM-accelerated) |
 | `web` | `package.json` | everything below + Playwright + pre-baked Chromium |
 | `general` | anything else | mise, node 24, pi, git/ripgrep/fd/jq, build tools, tmux, vim, python — plus your read-only git identity |
 
@@ -45,10 +46,22 @@ the repo root: `profile = "android"`. Precedence: env → file → auto-detect
 Android's multi-GB toolchain lives **only** on the host: the android sandbox
 mounts `~/Android/Sdk` (override with `PI_SANDBOX_ANDROID_SDK`) read-only at
 `/opt/android-sdk`, and the image itself just adds JDK 21 and the emulator's
-runtime libraries to `general`. Required SDK components: `cmdline-tools/latest`,
-`platform-tools`, `emulator`, `platforms/android-36`, `build-tools/36.0.0`,
-`system-images;android-34;google_apis;x86_64` — `pis doctor` checks them and
-`pis` hard-errors with a provisioning hint when any are missing. Profiles run as
+runtime libraries to `general`. The SDK requirement is split in two: structural
+parts (`cmdline-tools/latest`, `platform-tools`, `emulator`) are always
+required; the project-specific parts default to `platforms/android-36`,
+`build-tools/36.0.0`, `system-images/android-34/google_apis/x86_64` and are
+configurable per repo via `.pi-sandbox.toml` or env (env wins; defaults shown):
+
+```toml
+sdk_components = "platforms/android-36 build-tools/36.0.0 system-images/android-34/google_apis/x86_64"
+avd_name       = "pixel_6_api_34"
+system_image   = "system-images;android-34;google_apis;x86_64"
+```
+
+(env forms: `PI_SANDBOX_ANDROID_SDK_COMPONENTS`, `PI_SANDBOX_AVD_NAME`,
+`PI_SANDBOX_ANDROID_SYSTEM_IMAGE`; if you change `system_image`, include its
+directory form in `sdk_components` too.) `pis doctor` checks the SDK and `pis`
+hard-errors with a provisioning hint when anything is missing. Profiles run as
 separate containers per repo, so parallel projects never collide and sessions
 persist per repo+profile until `pis clean -y`.
 
@@ -63,6 +76,7 @@ pis status              # repo, profile, image, container state
 pis doctor [--smoke]    # environment checks (+ pi auth smoke test)
 pis rebuild [profile|all]
 pis use-pi [x.y.z]      # pin the sandbox pi version (default: host pi's) + rebuild
+pis install-apk [path] [args…]  # adb-install to a PHYSICAL device (host-side)
 pis down                # stop container (volumes/sessions kept)
 pis clean -y            # stop + delete volumes (incl. sessions)
 pis sync-config         # refresh pi-home/ from ~/.pi/agent
@@ -116,6 +130,26 @@ Since the `.git` is shared, a `git fetch` on the host is instantly visible
 inside, so the natural split is: fetch/push on the host, everything else in the
 sandbox.
 
+## Physical devices
+
+There is deliberately **no adb bridge into sandboxes** — one would hand sandbox
+code full control of every device your host can see. Instead, build inside the
+sandbox (output lands in the shared `/workspace`) and install from the host:
+
+```bash
+pis install-apk                                  # newest */build/outputs/*.apk
+pis install-apk path/to/app.apk --grant-permissions   # explicit APK + adb args
+```
+
+`pis install-apk` resolves `adb` from `PI_SANDBOX_ANDROID_SDK/platform-tools`
+(falling back to `PATH`) and runs `adb install -r …` on the host. Missing adb or
+APK is a hard error — it never silently succeeds.
+
+**Debug-keystore caveat**: debug APKs built in the sandbox are signed with the
+sandbox's own debug keystore, so updating an app previously installed from a
+host-built APK can fail with a signature mismatch. Fix with `adb uninstall`
+first, or keep one consistent debug keystore across host and sandbox.
+
 ## How the pieces fit
 
 - **Images** (`docker/`): `general` (Dockerfile.base) is the base; `web` and
@@ -132,13 +166,17 @@ sandbox.
   *yours to edit* is `pi-home/AGENTS.md`. See `pi-home/README.md`.
 - **Custom AGENTS.md**: `pi-home/AGENTS.md` is your standing instruction file for
   every sandbox (project AGENTS.md files layer on top). No kit-injected defaults.
-- **Auth**: `XIAOMI_TOKEN_PLAN_SGP_API_KEY` from a gitignored `.env` (or the host
-  environment) is injected as process env. Credentials never persist on the
-  sandbox's disk — pi's empty `{}` `auth.json` startup stub is cleaned up
-  automatically and any populated one is removed with a warning. See
-  `docs/security.md` for the threat model — including what env-var
-  exposure means and how to go further (e.g. Docker Sandboxes' secret proxy) if
-  your threat model requires it.
+- **Auth**: the `.env`-as-passthrough contract — **every variable in `.env`**
+  (your provider's `*_API_KEY`, or any other name) is injected as process env
+  into every sandbox, so every provider pi supports works with zero code
+  changes. Host `*_API_KEY` vars (plus `PI_SANDBOX_EXTRA_ENV` names) are
+  forwarded on each exec — values never in argv; keyless providers set
+  `PI_SANDBOX_ALLOW_NO_AUTH=1`. `pis status`/`doctor` show credential *names*
+  and sources, never values. Credentials never persist on the sandbox's disk —
+  pi's empty `{}` `auth.json` startup stub is cleaned up automatically and any
+  populated one is removed with a warning. See `docs/security.md` for the threat
+  model — including what env-var exposure means and how to go further (e.g.
+  Docker Sandboxes' secret proxy) if your threat model requires it.
 - **Crash-proof debugging**: the container is a keep-alive box independent of pi.
   When pi exits or crashes, interactive `pis` drops you into a sandbox shell with
   the state intact; `pis shell` / `pis logs` work any time afterwards.

@@ -41,8 +41,10 @@ Be concise. Do not give excessive detail when responding to the user, when writi
 
 - **Never fall back to host pi.** Any failure in the sandbox chain is a hard
   error with a fix hint; whenever `pis` runs pi, the boundary is real.
-- **`auth.json` never on disk in sandboxes.** Auth is env-var passthrough;
-  seeding removes pi's empty `{}` stub and loudly removes any populated one;
+- **`auth.json` never on disk in sandboxes.** Auth is the `.env` passthrough
+  contract (every variable in `.env` is injected into every sandbox; host
+  `*_API_KEY` / `PI_SANDBOX_EXTRA_ENV` vars pass per exec); seeding removes pi's
+  empty `{}` stub and loudly removes any populated one;
   a credential appearing in the `pi-home/` overlay aborts the sync.
 - **Git identity crosses read-only; credentials never.** `~/.gitconfig` and
   `~/.config/git` are mounted read-only so commits inside carry the host

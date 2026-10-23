@@ -10,11 +10,16 @@
 #                    /opt/android-sdk (android service only)
 #   PI_SANDBOX_GIT_HOME     dir holding .gitconfig + .config/git, mounted
 #                    read-only so commits carry your identity (every service)
+#   PI_SANDBOX_AVD_NAME / PI_SANDBOX_ANDROID_SYSTEM_IMAGE
+#                    AVD the entrypoint prepares (android service)
 #
 # Security posture (see docs/security.md): non-root user, cap_drop: ALL,
 # no-new-privileges, no docker.sock, no published ports, outbound egress only.
-# Credentials arrive as process env (XIAOMI_TOKEN_PLAN_SGP_API_KEY) and are
-# never written to disk inside a sandbox.
+# Provider credentials arrive as process env: every variable in .env is injected
+# into every sandbox (the .env passthrough contract — any provider pi supports
+# works with zero code changes), and host *_API_KEY / PI_SANDBOX_EXTRA_ENV vars
+# are passed per exec by `pis` (compose exec -e NAME). Credentials are never
+# written to disk inside a sandbox.
 
 x-hardening: &hardening
   init: true
@@ -23,8 +28,12 @@ x-hardening: &hardening
   security_opt: ["no-new-privileges:true"]
   working_dir: /workspace
   command: ["keep-alive"]
-  environment:
-    XIAOMI_TOKEN_PLAN_SGP_API_KEY: "${XIAOMI_TOKEN_PLAN_SGP_API_KEY:-}"
+  # The passthrough contract: every variable in .env (any provider's key, any
+  # name) becomes process env in every sandbox. Long-form env_file with
+  # required: false needs Docker Compose >= 2.24.
+  env_file:
+    - path: .env
+      required: false
 
 x-build-args: &build-args
   HOST_UID: "${HOST_UID:-1000}"
@@ -74,6 +83,9 @@ services:
       dockerfile: docker/Dockerfile.android
       args:
         <<: *build-args
+    environment:
+      PI_SANDBOX_AVD_NAME: "${PI_SANDBOX_AVD_NAME:-pixel_6_api_34}"
+      PI_SANDBOX_ANDROID_SYSTEM_IMAGE: "${PI_SANDBOX_ANDROID_SYSTEM_IMAGE:-system-images;android-34;google_apis;x86_64}"
     devices: ["/dev/kvm"]
     group_add: ["${KVM_GID:-0}"]
     volumes:

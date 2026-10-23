@@ -16,12 +16,19 @@ with `pis doctor`.
 - Emulator boot takes 1–2 minutes; `scripts/ensure-emulator.sh` waits up to 120 s
   and disables animations automatically.
 
-## Auth: pi can't reach the Xiaomi provider
+## Auth: pi can't reach the model provider
 
-- `pis doctor` shows whether `XIAOMI_TOKEN_PLAN_SGP_API_KEY` is configured.
-- If `.env` is missing: `./install` seeds it from `~/.pi/agent/auth.json`, or copy
-  `.env.example` → `.env` and fill the key. (Resolution order in pi: process env,
-  then `auth.json` — sandboxes only ever get the env var.)
+- `pis doctor` shows which credential vars are configured (names and sources,
+  never values). Auth is a passthrough: **every variable in `.env`** becomes env
+  inside every sandbox, and exported `*_API_KEY` host vars (plus any names in
+  `PI_SANDBOX_EXTRA_ENV`) are forwarded on each exec.
+- If `.env` is missing: `./install` seeds `<PROVIDER>_API_KEY` vars from
+  `~/.pi/agent/auth.json`, or copy `.env.example` → `.env` and set the vars your
+  provider needs. Sandboxes are env-only — OAuth `/login` credentials in
+  `auth.json` never cross the boundary; put the provider's env var in `.env` by
+  hand if pi's provider docs name one.
+- Keyless provider (e.g. a local endpoint)? `PI_SANDBOX_ALLOW_NO_AUTH=1` skips
+  the guard.
 - After changing `.env`, restart the container so the env is re-injected:
   `pis down && pis`.
 
@@ -30,6 +37,10 @@ with `pis doctor`.
 - pi inside sandboxes runs with all tools enabled and `defaultProjectTrust:
   "always"` — it should never stop for permission or trust prompts. If pi asks
   something, that's the model talking, not a permission gate.
+- Plan-mode-style extensions enforce their own bash command-policy allowlist on
+  top of tool visibility — seeing `!`/bash does not mean every command is
+  allowed. Tool visibility ≠ command allowlist; if commands get refused, check
+  the extension's policy, not the sandbox.
 - `pi-sbx` is intentionally removed from sandbox settings (`pis sync-config`
   strips it; `--keep-pi-sbx` restores it). If you want it back, re-add it to
   `pi-home/settings.json` packages.

@@ -32,14 +32,14 @@ make_sdk() {
 @test "android SDK: a complete SDK lets the android sandbox start" {
   [[ -c /dev/kvm && -r /dev/kvm && -w /dev/kvm ]] || skip "needs rw /dev/kvm (ensure_kvm gate)"
   make_sdk
-  run env XIAOMI_TOKEN_PLAN_SGP_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" run -- true
+  run env ANTHROPIC_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" run -- true
   [ "$status" -eq 0 ]
   grep -q "compose up -d android" "$FAKE_DOCKER_LOG"
   [ ! -e "$PI_TRIPWIRE" ]
 }
 
 @test "android SDK: a missing SDK directory is a hard error with a provisioning hint" {
-  run env XIAOMI_TOKEN_PLAN_SGP_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" run -- true
+  run env ANTHROPIC_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" run -- true
   [ "$status" -eq 1 ]
   [[ "$output" == *"needs a host Android SDK at $SDK"* ]]
   [[ "$output" == *"PI_SANDBOX_ANDROID_SDK=/path/to/Android/Sdk"* ]]
@@ -51,7 +51,7 @@ make_sdk() {
 @test "android SDK: an incomplete SDK names every missing component" {
   make_sdk
   rmdir "$SDK/emulator" "$SDK/system-images/android-34/google_apis/x86_64"
-  run env XIAOMI_TOKEN_PLAN_SGP_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" run -- true
+  run env ANTHROPIC_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" run -- true
   [ "$status" -eq 1 ]
   [[ "$output" == *"missing: emulator, system-images/android-34/google_apis/x86_64"* ]]
   ! grep -q "compose up" "$FAKE_DOCKER_LOG"
@@ -60,7 +60,7 @@ make_sdk() {
 
 @test "android SDK: non-android profiles never require the SDK" {
   rm settings.gradle.kts
-  run env XIAOMI_TOKEN_PLAN_SGP_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" run -- true
+  run env ANTHROPIC_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" run -- true
   [ "$status" -eq 0 ]
   grep -q "compose up -d general" "$FAKE_DOCKER_LOG"
 }
@@ -82,11 +82,11 @@ make_sdk() {
 
 @test "android SDK: doctor passes a complete SDK and fails a partial one" {
   make_sdk
-  run env XIAOMI_TOKEN_PLAN_SGP_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" doctor
+  run env ANTHROPIC_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" doctor
   [ "$status" -eq 0 ]
   [[ "$output" == *"android SDK complete ($SDK"* ]]
   rmdir "$SDK/build-tools/36.0.0"
-  run env XIAOMI_TOKEN_PLAN_SGP_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" doctor
+  run env ANTHROPIC_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" doctor
   [ "$status" -eq 1 ]
   [[ "$output" == *"missing: build-tools/36.0.0"* ]]
 }

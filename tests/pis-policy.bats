@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # pis policy — profile selection, project naming, image staleness stamps,
-# subcommand dispatch, the never-fall-back-to-host-pi rule, and the auth guard.
+# subcommand dispatch, and the never-fall-back-to-host-pi rule.
+# (Provider auth lives in tests/auth.bats.)
 #
 # Hermetic: docker is a test double (tests/test_helper.bash) and host pi is a
 # tripwire. Nothing here needs a real container.
@@ -158,13 +159,13 @@ teardown() {
   run env PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" shell
   [ "$status" -eq 1 ]
   [[ "$output" == *"needs an interactive terminal"* ]]
-  run env XIAOMI_TOKEN_PLAN_SGP_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" -- shell
+  run env ANTHROPIC_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" -- shell
   [ "$status" -eq 0 ]
   grep -q "pis-sh shell" "$FAKE_DOCKER_LOG"
 }
 
 @test "dispatch: unknown words pass through to pi as prompts" {
-  run env XIAOMI_TOKEN_PLAN_SGP_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" fix the bug
+  run env ANTHROPIC_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" fix the bug
   [ "$status" -eq 0 ]
   grep -q "pis-sh fix the bug" "$FAKE_DOCKER_LOG"
 }
@@ -201,33 +202,18 @@ teardown() {
   [ ! -e "$PI_TRIPWIRE" ]
 }
 
-# --------------------------------------------------------- auth guard -----
+# --------------------------------------------------------- doctor gate ----
 
-@test "auth guard: empty env + absent .env aborts before anything starts" {
-  run env PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS"
+@test "doctor: docker compose older than 2.24 is flagged (env_file needs it)" {
+  run env ANTHROPIC_API_KEY=tok FAKE_COMPOSE_VERSION=2.20.0 \
+    PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" doctor
   [ "$status" -eq 1 ]
-  [[ "$output" == *"XIAOMI_TOKEN_PLAN_SGP_API_KEY is not configured"* ]]
-  [[ "$output" == *"hint:"* ]]
-  ! grep -q "compose up" "$FAKE_DOCKER_LOG"
-  [ ! -e "$PI_TRIPWIRE" ]
+  [[ "$output" == *"older than 2.24"* ]]
 }
 
-@test "auth guard: an empty-value .env does not count as configured" {
-  echo 'XIAOMI_TOKEN_PLAN_SGP_API_KEY=' >"$PI_SANDBOX_HOME/.env"
-  run env PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"XIAOMI_TOKEN_PLAN_SGP_API_KEY is not configured"* ]]
-}
-
-@test "auth guard: a key from the environment satisfies the guard" {
-  run env XIAOMI_TOKEN_PLAN_SGP_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS"
+@test "doctor: a modern docker compose passes the version check" {
+  run env ANTHROPIC_API_KEY=tok FAKE_COMPOSE_VERSION=2.31.0 \
+    PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" doctor
   [ "$status" -eq 0 ]
-  grep -q "compose up -d general" "$FAKE_DOCKER_LOG"
-}
-
-@test "auth guard: a key from .env satisfies the guard" {
-  echo 'XIAOMI_TOKEN_PLAN_SGP_API_KEY=from-dotenv' >"$PI_SANDBOX_HOME/.env"
-  run env PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS"
-  [ "$status" -eq 0 ]
-  grep -q "compose up -d general" "$FAKE_DOCKER_LOG"
+  ! grep -q "older than 2.24" <<<"$output"
 }

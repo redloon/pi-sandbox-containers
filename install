@@ -48,22 +48,43 @@ if ! grep -qs '\.local/bin' "$HOME/.bashrc"; then
   echo "• added ~/.local/bin to PATH in ~/.bashrc (open a new shell or: source ~/.bashrc)"
 fi
 
-# --- 4. seed .env with the Xiaomi key (value is never printed) ---------------
+# --- 4. seed .env with provider credentials (values are never printed) -------
+# The passthrough contract: every variable in .env becomes process env inside
+# every sandbox, so any provider pi supports works with zero code changes.
+# auth.json entries with a .key seed <SLUG_UPPER_WITH_UNDERSCORES>_API_KEY;
+# entries without one (OAuth /login) get a loud note — sandboxes are env-only.
 if [[ $NO_AUTH == 0 && ! -f "$HERE/.env" ]]; then
-  key="" key_from=""
-  if [[ -n "${XIAOMI_TOKEN_PLAN_SGP_API_KEY:-}" ]]; then
-    key="$XIAOMI_TOKEN_PLAN_SGP_API_KEY"
-    key_from="environment"
-  elif [[ -f "$HOME/.pi/agent/auth.json" ]] && command -v jq >/dev/null 2>&1; then
-    key="$(jq -r '."xiaomi-token-plan-sgp".key // empty' "$HOME/.pi/agent/auth.json" 2>/dev/null || true)"
-    key_from="$HOME/.pi/agent/auth.json"
-  fi
-  if [[ -n "$key" ]]; then
+  auth_json="$HOME/.pi/agent/auth.json"
+  seeded="" keyless=""
+  if [[ -f "$auth_json" ]] && command -v jq >/dev/null 2>&1; then
     umask 077
-    printf 'XIAOMI_TOKEN_PLAN_SGP_API_KEY=%s\n' "$key" >"$HERE/.env"
-    echo "• auth: seeded .env from $key_from (gitignored; value never printed)"
+    : >"$HERE/.env"
+    while IFS=$'\t' read -r slug key; do
+      [[ -n "$slug" && -n "$key" ]] || continue
+      name="$(printf '%s' "$slug" | tr '[:lower:]' '[:upper:]' | sed 's/[^A-Z0-9]\+/_/g')_API_KEY"
+      printf '%s=%s\n' "$name" "$key" >>"$HERE/.env"
+      seeded="${seeded:+$seeded, }$name"
+    done < <(jq -r 'to_entries[] | select((.value | type) == "object")
+      | select((.value.key? // "") != "")
+      | [.key, (.value.key | tostring)] | @tsv' "$auth_json" 2>/dev/null || true)
+    while IFS= read -r slug; do
+      [[ -n "$slug" ]] || continue
+      name="$(printf '%s' "$slug" | tr '[:lower:]' '[:upper:]' | sed 's/[^A-Z0-9]\+/_/g')_API_KEY"
+      keyless="${keyless:+$keyless, }$slug → $name"
+    done < <(jq -r 'to_entries[] | select((.value | type) == "object")
+      | select((.value.key? // "") == "") | .key' "$auth_json" 2>/dev/null || true)
+  fi
+  if [[ -n "$seeded" ]]; then
+    echo "• auth: seeded .env from $auth_json (gitignored; values never printed): $seeded"
   else
-    echo "• auth: could not seed .env — copy .env.example to .env and set XIAOMI_TOKEN_PLAN_SGP_API_KEY"
+    rm -f "$HERE/.env"
+    echo "• auth: nothing seeded — copy .env.example to .env and set your provider's key(s)"
+    echo "        (every var in .env is injected into sandboxes; exported *_API_KEY host vars work too)"
+  fi
+  if [[ -n "$keyless" ]]; then
+    echo "• auth: auth.json entries without an API key (OAuth /login?): $keyless"
+    echo "        sandboxes are env-only (no auth.json on disk) — if pi's provider docs name an"
+    echo "        env var, add it to .env by hand (the <name>_API_KEY convention can differ)."
   fi
 fi
 
@@ -91,6 +112,6 @@ fi
 
 echo
 echo "Done. The everyday command is:  pis"
-echo "  cd ~/work/personal-crm && pis     # android sandbox, straight into pi"
+echo "  cd ~/work/my-app && pis       # your repo's sandbox, straight into pi"
 echo "  pis -p \"your task\"                # unattended one-shot"
 echo "  pis doctor                        # re-run checks any time"

@@ -7,3 +7,6 @@ pi-home/npm/
 
 # Machine-local sync bookkeeping.
 pi-home/.sync-stamp
+
+# Local sandbox-runtime state (pi-sbx policy), never tracked.
+.pi/

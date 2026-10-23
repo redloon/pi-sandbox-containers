@@ -20,7 +20,7 @@ teardown() {
 }
 
 @test "git home: missing config files are prepared before the container starts" {
-  run env XIAOMI_TOKEN_PLAN_SGP_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" run -- true
+  run env ANTHROPIC_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" run -- true
   [ "$status" -eq 0 ]
   [ -f "$PI_SANDBOX_GIT_HOME/.gitconfig" ]
   [ -d "$PI_SANDBOX_GIT_HOME/.config/git" ]
@@ -29,7 +29,7 @@ teardown() {
 
 @test "git home: existing host config is left untouched" {
   printf '[user]\n\tname = Test User\n' >"$PI_SANDBOX_GIT_HOME/.gitconfig"
-  run env XIAOMI_TOKEN_PLAN_SGP_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" run -- true
+  run env ANTHROPIC_API_KEY=tok PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" run -- true
   [ "$status" -eq 0 ]
   grep -q 'name = Test User' "$PI_SANDBOX_GIT_HOME/.gitconfig"
 }

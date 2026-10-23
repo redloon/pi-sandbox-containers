@@ -65,7 +65,7 @@ teardown() {
 }
 
 @test "doctor: pi version drift warns and points at use-pi" {
-  run env XIAOMI_TOKEN_PLAN_SGP_API_KEY=tok FAKE_HOST_PI_VERSION=9.9.9 \
+  run env ANTHROPIC_API_KEY=tok FAKE_HOST_PI_VERSION=9.9.9 \
     PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" doctor
   [ "$status" -eq 0 ]
   [[ "$output" == *"pi version drift: host pi 9.9.9, sandbox pinned to 1.2.0"* ]]
@@ -73,14 +73,14 @@ teardown() {
 }
 
 @test "doctor: in-sync versions are reported as in sync" {
-  run env XIAOMI_TOKEN_PLAN_SGP_API_KEY=tok FAKE_HOST_PI_VERSION=1.2.0 \
+  run env ANTHROPIC_API_KEY=tok FAKE_HOST_PI_VERSION=1.2.0 \
     PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" doctor
   [ "$status" -eq 0 ]
   [[ "$output" == *"pi version in sync (host and sandbox: 1.2.0)"* ]]
 }
 
 @test "pi runs announce drift up front, and the probe never runs host pi" {
-  run env XIAOMI_TOKEN_PLAN_SGP_API_KEY=tok FAKE_HOST_PI_VERSION=9.9.9 \
+  run env ANTHROPIC_API_KEY=tok FAKE_HOST_PI_VERSION=9.9.9 \
     PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS"
   [ "$status" -eq 0 ]
   [[ "$output" == *"pi version drift: host pi 9.9.9, sandbox pinned to 1.2.0"* ]]

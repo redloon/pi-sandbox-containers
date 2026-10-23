@@ -35,6 +35,8 @@ Usage:
   pis use-pi [x.y.z]        pin the sandbox pi (default: host pi's) + rebuild
   pis down                  stop this repo's sandbox container
   pis clean -y              stop and DELETE this sandbox's volumes (sessions too)
+  pis install-apk [path] [args…]  adb-install an APK onto a PHYSICAL device from
+                            the host (default: newest */build/outputs/*.apk)
   pis sync-config [--with-agents] [--keep-pi-sbx] [--no-npm]
                             force a pi-home/ refresh from ~/.pi/agent now
                             (also automatic before every pi/run/shell;
@@ -44,6 +46,16 @@ Usage:
 Profiles are auto-detected from the repo (android > web > general). Override
 with PI_SANDBOX_PROFILE=… or a .pi-sandbox.toml in the repo root:
     profile = "android"   # or "web" / "general"
+Android toolchain knobs (env overrides the file; defaults shown):
+    sdk_components = "platforms/android-36 build-tools/36.0.0 system-images/android-34/google_apis/x86_64"
+    avd_name       = "pixel_6_api_34"
+    system_image   = "system-images;android-34;google_apis;x86_64"
+  env names: PI_SANDBOX_ANDROID_SDK_COMPONENTS / PI_SANDBOX_AVD_NAME /
+             PI_SANDBOX_ANDROID_SYSTEM_IMAGE
+
+Provider auth is a passthrough contract: every variable in .env is injected
+into every sandbox; host *_API_KEY vars (plus PI_SANDBOX_EXTRA_ENV names) are
+passed per exec. Keyless providers: PI_SANDBOX_ALLOW_NO_AUTH=1.
 EOF
 }
 
@@ -84,6 +96,25 @@ DOCKER_HASH="$(compute_docker_hash)"
 KVM_GID="$(stat -c '%g' /dev/kvm 2>/dev/null || echo 0)"
 
 # ----------------------------------------------------------------- compose -- #
+# Generic scalar lookup in the repo's .pi-sandbox.toml (quoted or bare value),
+# for keys like profile / sdk_components / avd_name / system_image.
+toml_scalar() {
+  local key="$1" file="$REPO_ROOT/.pi-sandbox.toml" v=""
+  [[ -f "$file" ]] || return 0
+  v="$(sed -nE "s|^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\"([^\"]*)\".*|\1|p" "$file" | head -1)"
+  if [[ -z "$v" ]]; then
+    v="$(sed -nE "s|^[[:space:]]*${key}[[:space:]]*=[[:space:]]*([^\"#]*[^\"#[:space:]])[[:space:]]*(#.*)?$|\1|p" "$file" | head -1)"
+  fi
+  printf '%s' "$v"
+}
+
+# Resolve a config scalar with the standard precedence: env > toml > default.
+resolve_config() { # $1=env var name, $2=toml key, $3=default → stdout
+  local v="${!1:-}"
+  [[ -n "$v" ]] || v="$(toml_scalar "$2")"
+  printf '%s' "${v:-$3}"
+}
+
 REPO_ROOT=""
 PROFILE=""
 PROFILE_SOURCE=""
@@ -97,10 +128,12 @@ resolve_context() {
   PROFILE="${PI_SANDBOX_PROFILE:-}"
   if [[ -n "$PROFILE" ]]; then
     PROFILE_SOURCE="PI_SANDBOX_PROFILE"
-  elif [[ -f "$REPO_ROOT/.pi-sandbox.toml" ]]; then
-    PROFILE="$(sed -nE 's/^[[:space:]]*profile[[:space:]]*=[[:space:]]*"?([A-Za-z-]+)"?.*/\1/p' "$REPO_ROOT/.pi-sandbox.toml" | head -1)"
-    [[ -n "$PROFILE" ]] || die ".pi-sandbox.toml exists but has no profile = \"…\" line"
+  elif [[ -n "$(toml_scalar profile)" ]]; then
+    PROFILE="$(toml_scalar profile)"
     PROFILE_SOURCE=".pi-sandbox.toml"
+  elif grep -qE '^[[:space:]]*profile[[:space:]]*[:=]' "$REPO_ROOT/.pi-sandbox.toml" 2>/dev/null; then
+    die ".pi-sandbox.toml has a profile line that could not be parsed" \
+      'use: profile = "android"   # or "web" / "general"'
   fi
   if [[ -z "$PROFILE" ]]; then
     if [[ -f "$REPO_ROOT/settings.gradle.kts" || -f "$REPO_ROOT/settings.gradle" ||
@@ -117,6 +150,14 @@ resolve_context() {
     general | web | android) ;;
     *) die "unknown profile '$PROFILE' (expected: general | web | android)" ;;
   esac
+
+  # Android toolchain knobs (env > .pi-sandbox.toml > default): the
+  # project-specific SDK components checked on the host, and the AVD/system
+  # image the entrypoint prepares (docker/entrypoint.sh).
+  ANDROID_SDK_COMPONENTS="$(resolve_config PI_SANDBOX_ANDROID_SDK_COMPONENTS sdk_components "$DEFAULT_SDK_COMPONENTS")"
+  ANDROID_AVD_NAME="$(resolve_config PI_SANDBOX_AVD_NAME avd_name pixel_6_api_34)"
+  ANDROID_SYSTEM_IMAGE="$(resolve_config PI_SANDBOX_ANDROID_SYSTEM_IMAGE system_image 'system-images;android-34;google_apis;x86_64')"
+  collect_exec_env
 
   local slug h6
   slug="$(basename "$REPO_ROOT" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//')"
@@ -136,6 +177,8 @@ compose() {
       DOCKER_HASH="$DOCKER_HASH" \
       PI_SANDBOX_ANDROID_SDK="${PI_SANDBOX_ANDROID_SDK:-$HOME/Android/Sdk}" \
       PI_SANDBOX_GIT_HOME="${PI_SANDBOX_GIT_HOME:-$HOME}" \
+      PI_SANDBOX_AVD_NAME="${ANDROID_AVD_NAME:-pixel_6_api_34}" \
+      PI_SANDBOX_ANDROID_SYSTEM_IMAGE="${ANDROID_SYSTEM_IMAGE:-system-images;android-34;google_apis;x86_64}" \
       docker compose "$@")
 }
 
@@ -152,20 +195,123 @@ need_docker() {
     die "docker compose v2 is missing" "install the docker-compose-plugin package"
 }
 
-auth_missing() {
-  if [[ -n "${XIAOMI_TOKEN_PLAN_SGP_API_KEY:-}" ]]; then return 1; fi
-  if [[ -f "$PI_SANDBOX_HOME/.env" ]] &&
-    grep -qE '^[[:space:]]*XIAOMI_TOKEN_PLAN_SGP_API_KEY=..*' "$PI_SANDBOX_HOME/.env"; then
-    return 1
-  fi
+# The .env passthrough uses compose's long-form env_file (required: false),
+# which needs Docker Compose >= 2.24. Unknown/odd versions don't block.
+compose_version_ok() {
+  local v major minor rest
+  v="$(docker compose version --short 2>/dev/null | sed 's/^[vV]//')"
+  major="${v%%.*}"
+  rest="${v#*.}"
+  minor="${rest%%.*}"
+  [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]] || return 0
+  ((major > 2 || (major == 2 && minor >= 24)))
+}
+
+# ------------------------------------------------------------ provider auth --
+# The .env passthrough contract: every variable in .env is injected into every
+# sandbox (compose env_file), unfiltered — any provider pi supports works with
+# zero code changes. Host-environment credentials are forwarded per exec
+# (compose exec -e NAME, value read from pis's own env — never in argv) so the
+# keep-alive container itself never holds host-env creds. Names are collected
+# without values; nothing here ever prints or stores a credential.
+
+# Non-empty credential vars in .env: any name except PI_SANDBOX_* config vars.
+dotenv_cred_names() {
+  [[ -f "$PI_SANDBOX_HOME/.env" ]] || return 0
+  local line name val trimmed
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    trimmed="${line#"${line%%[![:space:]]*}"}"
+    case "$trimmed" in
+      '' | '#'*) continue ;;
+    esac
+    [[ "$line" == *=* ]] || continue
+    name="${line%%=*}"
+    val="${line#*=}"
+    name="${name//[[:space:]]/}"
+    case "$name" in
+      PI_SANDBOX_*) continue ;;
+    esac
+    [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    val="${val#\"}"
+    val="${val%\"}"
+    val="${val#\'}"
+    val="${val%\'}"
+    [[ -n "${val//[[:space:]]/}" ]] || continue
+    printf '%s\n' "$name"
+  done <"$PI_SANDBOX_HOME/.env"
   return 0
+}
+
+# Host-env credentials forwarded to sandbox execs: every exported *_API_KEY
+# plus any names listed in PI_SANDBOX_EXTRA_ENV (comma/space separated).
+host_cred_names() {
+  local name seen=$'\n' extra
+  local -a extra_names=()
+  while IFS= read -r name; do
+    [[ "$name" == *_API_KEY ]] || continue
+    [[ -n "${!name:-}" ]] || continue
+    [[ "$seen" == *$'\n'"$name"$'\n'* ]] && continue
+    seen+="$name"$'\n'
+    printf '%s\n' "$name"
+  done < <(compgen -e)
+  extra="${PI_SANDBOX_EXTRA_ENV:-}"
+  read -r -a extra_names <<<"${extra//,/ }"
+  for name in "${extra_names[@]}"; do
+    [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    [[ -n "${!name:-}" ]] || continue
+    [[ "$seen" == *$'\n'"$name"$'\n'* ]] && continue
+    seen+="$name"$'\n'
+    printf '%s\n' "$name"
+  done
+  return 0
+}
+
+# Auth is "configured" when ≥1 credential var is visible from .env or the host
+# env; PI_SANDBOX_ALLOW_NO_AUTH=1 is the escape hatch for keyless providers.
+auth_missing() {
+  if [[ "${PI_SANDBOX_ALLOW_NO_AUTH:-0}" == 1 ]]; then return 1; fi
+  local names
+  names="$(
+    dotenv_cred_names
+    host_cred_names
+  )"
+  [[ -z "$names" ]]
 }
 
 require_auth() {
   if auth_missing; then
-    die "XIAOMI_TOKEN_PLAN_SGP_API_KEY is not configured" \
-      "add it to $PI_SANDBOX_HOME/.env (see .env.example) or export it; ./install seeds it from ~/.pi/agent/auth.json"
+    die "no provider credentials configured" \
+      "every var in $PI_SANDBOX_HOME/.env is injected into sandboxes — add your provider's key there (see .env.example), export a *_API_KEY on the host, or run ./install (seeds from ~/.pi/agent/auth.json); keyless providers: PI_SANDBOX_ALLOW_NO_AUTH=1"
   fi
+}
+
+# Var NAMES and their sources (with count) — never values; safe to print.
+auth_display() {
+  local dn hn src="" n
+  dn="$(dotenv_cred_names | sort -u)"
+  hn="$(host_cred_names | sort -u)"
+  if [[ -n "$dn" ]]; then
+    src=".env: ${dn//$'\n'/, }"
+  fi
+  if [[ -n "$hn" ]]; then
+    src="${src:+$src; }host env: ${hn//$'\n'/, }"
+  fi
+  n="$(printf '%s\n%s\n' "$dn" "$hn" | sort -u | grep -c . || true)"
+  printf '%s var%s (%s)' "$n" "$([[ "$n" == 1 ]] || printf 's')" "$src"
+}
+
+# Host-env credentials reach sandboxes as `compose exec -e NAME`: the value is
+# resolved from pis's own environment by the compose CLI, never placed in argv
+# (where any process could read it from /proc) and never written to disk.
+EXEC_ENV_ARGS=()
+collect_exec_env() {
+  EXEC_ENV_ARGS=()
+  local name
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    EXEC_ENV_ARGS+=(-e "$name")
+  done < <(host_cred_names)
+  return 0
 }
 
 # Version probe only (metadata) — this is not "running pi as a fallback"; the
@@ -201,14 +347,20 @@ ensure_kvm() {
 # emulator's runtime libs. Refuse to start with a missing or partial SDK — the
 # failure would otherwise surface much later inside Gradle/emulator, far from
 # the cause.
-ANDROID_SDK_REQUIRED=(
+# Structural SDK parts: the tooling `pis` and the emulator themselves need —
+# always required, not configurable.
+ANDROID_SDK_STRUCTURAL=(
   "cmdline-tools/latest"
   "platform-tools"
   "emulator"
-  "platforms/android-36"
-  "build-tools/36.0.0"
-  "system-images/android-34/google_apis/x86_64"
 )
+# Project-specific parts (compile SDK, build tools, system image): configurable
+# via PI_SANDBOX_ANDROID_SDK_COMPONENTS or sdk_components in .pi-sandbox.toml
+# (space-separated; dir or sdkmanager ';' form). Defaults are the current pin.
+DEFAULT_SDK_COMPONENTS="platforms/android-36 build-tools/36.0.0 system-images/android-34/google_apis/x86_64"
+ANDROID_SDK_COMPONENTS="$DEFAULT_SDK_COMPONENTS"
+ANDROID_AVD_NAME="pixel_6_api_34"
+ANDROID_SYSTEM_IMAGE="system-images;android-34;google_apis;x86_64"
 
 android_sdk_root() { printf '%s' "${PI_SANDBOX_ANDROID_SDK:-$HOME/Android/Sdk}"; }
 
@@ -216,13 +368,28 @@ android_sdk_root() { printf '%s' "${PI_SANDBOX_ANDROID_SDK:-$HOME/Android/Sdk}";
 # the directory is absent); empty output means the SDK is complete.
 android_sdk_missing_parts() {
   local root="$1" p
+  local -a extra=()
+  read -r -a extra <<<"$ANDROID_SDK_COMPONENTS"
   if [[ ! -d "$root" ]]; then
     printf '%s\n' "$root"
     return 0
   fi
-  for p in "${ANDROID_SDK_REQUIRED[@]}"; do
+  for p in "${ANDROID_SDK_STRUCTURAL[@]}" "${extra[@]}"; do
+    p="${p//;//}"
     [[ -d "$root/$p" ]] || printf '%s\n' "$p"
   done
+}
+
+# sdkmanager-shaped hint (that CLI uses ';' separators): everything the host
+# SDK must carry, derived from the configured components.
+sdkmanager_hint() {
+  local p out=""
+  local -a extra=()
+  read -r -a extra <<<"$ANDROID_SDK_COMPONENTS"
+  for p in platform-tools emulator "${extra[@]}"; do
+    out="${out:+$out }\"${p//\//;}\""
+  done
+  printf '%s' "$out"
 }
 
 # Comma-joined missing parts for humans (pure bash: this runs under the test
@@ -242,11 +409,11 @@ ensure_android_sdk() {
   missing="$(android_sdk_missing_csv "$root")"
   if [[ ! -d "$root" ]]; then
     die "the android sandbox needs a host Android SDK at $root — the directory does not exist" \
-      "provision one (Android Studio's SDK Manager, or: sdkmanager \"platform-tools\" \"emulator\" \"platforms;android-36\" \"build-tools;36.0.0\" \"system-images;android-34;google_apis;x86_64\") or set PI_SANDBOX_ANDROID_SDK=/path/to/Android/Sdk"
+      "provision one (Android Studio's SDK Manager, or: sdkmanager $(sdkmanager_hint)) or set PI_SANDBOX_ANDROID_SDK=/path/to/Android/Sdk"
   fi
   [[ -z "$missing" ]] ||
     die "the host Android SDK at $root is incomplete — missing: $missing" \
-      "install the missing components (sdkmanager \"platform-tools\" \"emulator\" \"platforms;android-36\" \"build-tools;36.0.0\" \"system-images;android-34;google_apis;x86_64\") or set PI_SANDBOX_ANDROID_SDK=/path/to/Android/Sdk"
+      "install the missing components (sdkmanager $(sdkmanager_hint)) or set PI_SANDBOX_ANDROID_SDK=/path/to/Android/Sdk"
 }
 
 ensure_image() {
@@ -307,9 +474,9 @@ WRAPPER_PLAIN="$WRAPPER_SEED"'; exec pi "$@"'
 run_pi() {
   printf '⬢ %s sandbox · %s\n' "$PROFILE" "$REPO_ROOT" >&2
   if [[ -t 0 && -t 1 ]]; then
-    compose exec "$PROFILE" bash -lc "$WRAPPER_INTERACTIVE" pis-sh "$@"
+    compose exec ${EXEC_ENV_ARGS[@]+"${EXEC_ENV_ARGS[@]}"} "$PROFILE" bash -lc "$WRAPPER_INTERACTIVE" pis-sh "$@"
   else
-    compose exec -T "$PROFILE" bash -lc "$WRAPPER_PLAIN" pis-sh "$@"
+    compose exec -T ${EXEC_ENV_ARGS[@]+"${EXEC_ENV_ARGS[@]}"} "$PROFILE" bash -lc "$WRAPPER_PLAIN" pis-sh "$@"
   fi
 }
 
@@ -337,7 +504,7 @@ cmd_run() {
   ensure_kvm
   ensure_image "$PROFILE"
   ensure_container
-  compose exec -T "$PROFILE" "$@"
+  compose exec -T ${EXEC_ENV_ARGS[@]+"${EXEC_ENV_ARGS[@]}"} "$PROFILE" "$@"
 }
 
 cmd_shell() {
@@ -349,7 +516,7 @@ cmd_shell() {
   ensure_kvm
   ensure_image "$PROFILE"
   ensure_container
-  compose exec "$PROFILE" bash
+  compose exec ${EXEC_ENV_ARGS[@]+"${EXEC_ENV_ARGS[@]}"} "$PROFILE" bash
 }
 
 cmd_logs() {
@@ -373,10 +540,12 @@ cmd_status() {
     state=stale
   fi
   printf 'image:     pi-sandbox:%s → %s\n' "$PROFILE" "$state"
-  if auth_missing; then
-    printf 'auth:      MISSING (XIAOMI_TOKEN_PLAN_SGP_API_KEY)\n'
+  if [[ "${PI_SANDBOX_ALLOW_NO_AUTH:-0}" == 1 ]]; then
+    printf 'auth:      ok (PI_SANDBOX_ALLOW_NO_AUTH=1 — keyless provider)\n'
+  elif auth_missing; then
+    printf 'auth:      MISSING (no provider credential vars in .env or host env)\n'
   else
-    printf 'auth:      ok (XIAOMI_TOKEN_PLAN_SGP_API_KEY)\n'
+    printf 'auth:      ok (%s)\n' "$(auth_display)"
   fi
   if [[ "$PROFILE" == android ]]; then
     if [[ -r /dev/kvm && -w /dev/kvm ]]; then
@@ -423,12 +592,17 @@ cmd_doctor() {
   else bad "docker daemon not reachable — start Docker and retry (pis never falls back to host pi)"; fi
   if docker compose version >/dev/null 2>&1; then
     ok "$(docker compose version --short 2>/dev/null | sed 's/^/docker compose v/')"
+    if ! compose_version_ok; then
+      bad "docker compose is older than 2.24 — the .env passthrough (env_file) needs >= 2.24; upgrade the compose plugin"
+    fi
   else bad "docker compose v2 missing"; fi
 
-  if auth_missing; then
-    bad "XIAOMI_TOKEN_PLAN_SGP_API_KEY not configured — run ./install or add it to $PI_SANDBOX_HOME/.env"
+  if [[ "${PI_SANDBOX_ALLOW_NO_AUTH:-0}" == 1 ]]; then
+    soft "provider auth bypassed (PI_SANDBOX_ALLOW_NO_AUTH=1 — keyless provider)"
+  elif auth_missing; then
+    bad "no provider credentials configured — add your provider's key to $PI_SANDBOX_HOME/.env (see .env.example), export a *_API_KEY, or run ./install (seeds from ~/.pi/agent/auth.json); keyless providers: PI_SANDBOX_ALLOW_NO_AUTH=1"
   else
-    ok "XIAOMI_TOKEN_PLAN_SGP_API_KEY configured"
+    ok "provider auth: $(auth_display)"
   fi
 
   if [[ -c /dev/kvm && -r /dev/kvm && -w /dev/kvm ]]; then
@@ -488,7 +662,7 @@ cmd_doctor() {
     ensure_image "$PROFILE"
     ensure_container
     local out
-    out="$(compose exec -T "$PROFILE" bash -lc "$WRAPPER_PLAIN" pis-sh -p 'Reply with exactly: OK' 2>&1)" ||
+    out="$(compose exec -T ${EXEC_ENV_ARGS[@]+"${EXEC_ENV_ARGS[@]}"} "$PROFILE" bash -lc "$WRAPPER_PLAIN" pis-sh -p 'Reply with exactly: OK' 2>&1)" ||
       {
         printf '%s\n' "$out" >&2
         bad "smoke test: pi failed to run"
@@ -574,6 +748,38 @@ cmd_clean() {
   need_docker
   compose down -v --remove-orphans
   note "sandbox and volumes deleted (pi-home/ overlay untouched)"
+}
+
+# Physical devices stay on the host: there is deliberately no adb bridge into
+# sandboxes (one would give sandbox code full control of every device the host
+# can see). Build in the sandbox — output lands in the shared /workspace — then
+# install from the host with this helper (README: Physical devices).
+cmd_install_apk() {
+  local apk=""
+  if [[ $# -gt 0 && (-f "$1" || "$1" == *.apk) ]]; then
+    apk="$1"
+    shift
+  fi
+  resolve_context
+  local adb
+  adb="$(android_sdk_root)/platform-tools/adb"
+  if [[ ! -x "$adb" ]]; then
+    adb="$(command -v adb || true)"
+    [[ -n "$adb" ]] ||
+      die "adb not found — cannot install to a physical device" \
+        "install Android platform-tools (…/platform-tools/adb under PI_SANDBOX_ANDROID_SDK), or put adb on PATH"
+  fi
+  if [[ -z "$apk" ]]; then
+    apk="$(find "$REPO_ROOT" -type f -name '*.apk' -path '*/build/outputs/*' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)"
+    [[ -n "$apk" ]] ||
+      die "no APK found under $REPO_ROOT/**/build/outputs" \
+        "build one first (e.g. pis run -- ./gradlew assembleDebug), or pass a path: pis install-apk /path/to/app.apk"
+  fi
+  [[ -f "$apk" ]] || die "APK not found: $apk" "pass an existing .apk file"
+  note "installing $apk (adb: $adb)"
+  "$adb" install -r "$apk" "$@" ||
+    die "adb install failed" \
+      "check 'adb devices' — the device must be visible to the HOST adb (there is no adb bridge into sandboxes; README: Physical devices)"
 }
 
 # ------------------------------------------------------------- config sync -- #
@@ -808,6 +1014,10 @@ main() {
     clean)
       shift
       cmd_clean "$@"
+      ;;
+    install-apk)
+      shift
+      cmd_install_apk "$@"
       ;;
     sync-config)
       shift

@@ -23,7 +23,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash bash-completion ca-certificates curl wget git ripgrep fd-find jq \
       unzip zip rsync build-essential python3 python3-pip python3-venv \
-      tmux procps coreutils file less openssh-client sqlite3 \
+      tmux procps coreutils file less openssh-client sqlite3 vim \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf "$(command -v fdfind)" /usr/local/bin/fd
 
@@ -57,6 +57,10 @@ RUN curl -fsSL https://mise.run | sh \
  && /home/pi/.local/bin/mise reshim \
  && printf '%s\n' 'eval "$(/home/pi/.local/bin/mise activate bash)"' >> /home/pi/.bashrc \
  && printf '%s\n' 'export PI_SANDBOX_NOTICE="pi runs inside a Docker sandbox (pi-sandbox-local)"' >> /home/pi/.bashrc
+
+# Baked into the image so the entrypoint can keep the mise data volume in sync
+# with the image's pi version (named volumes seed from the image only once).
+ENV PI_VERSION=${PI_VERSION}
 
 # --- tracked pi-home overlay (bind-mounted read-only over this at runtime) ---
 USER root

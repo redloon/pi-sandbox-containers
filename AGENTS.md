@@ -21,6 +21,9 @@ After touching `bin/pis` or `docker/`, also run `scripts/check.sh --slow` when
 Docker is available (adds `pis doctor --smoke` and a compose lifecycle smoke).
 `scripts/qa.sh` is a thin compatibility wrapper for the same gate.
 
+## Text/Writing
+
+Be concise. Do not give excessive detail when responding to the user, when writing docs, or writing git commits especially. Don't leave out critical elements, but you also don't need to include every ephemeral detail.
 ## Tests
 
 - The suite lives in `tests/*.bats`, one bats case per invariant. New behavior
@@ -41,6 +44,10 @@ Docker is available (adds `pis doctor --smoke` and a compose lifecycle smoke).
 - **`auth.json` never on disk in sandboxes.** Auth is env-var passthrough;
   seeding removes pi's empty `{}` stub and loudly removes any populated one;
   a credential appearing in the `pi-home/` overlay aborts the sync.
+- **Git identity crosses read-only; credentials never.** `~/.gitconfig` and
+  `~/.config/git` are mounted read-only so commits inside carry the host
+  identity; `~/.ssh`, `~/.git-credentials` and ssh-agent are never mapped —
+  push/PR stays on the host.
 - **Deletions propagate host → overlay → container agent dir.** Removing
   something on the host must remove it everywhere; stale copies from older
   seeds must not linger in volumes.

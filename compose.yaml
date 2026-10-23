@@ -8,6 +8,8 @@
 #   DOCKER_HASH      content stamp; stale images auto-rebuild on next `pis`
 #   PI_SANDBOX_ANDROID_SDK  host Android SDK, mounted read-only at
 #                    /opt/android-sdk (android service only)
+#   PI_SANDBOX_GIT_HOME     dir holding .gitconfig + .config/git, mounted
+#                    read-only so commits carry your identity (every service)
 #
 # Security posture (see docs/security.md): non-root user, cap_drop: ALL,
 # no-new-privileges, no docker.sock, no published ports, outbound egress only.
@@ -42,6 +44,8 @@ services:
     volumes:
       - "${SANDBOX_WORKDIR:?SANDBOX_WORKDIR must point at the repo to mount}:/workspace"
       - "./pi-home:/opt/pi-home:ro"
+      - "${PI_SANDBOX_GIT_HOME:?PI_SANDBOX_GIT_HOME must point at the host git home}/.gitconfig:/home/pi/.gitconfig:ro"
+      - "${PI_SANDBOX_GIT_HOME:?PI_SANDBOX_GIT_HOME must point at the host git home}/.config/git:/home/pi/.config/git:ro"
       - "pi-home-general:/home/pi/.pi/agent"
       - "mise-data-general:/home/pi/.local/share/mise"
 
@@ -56,6 +60,8 @@ services:
     volumes:
       - "${SANDBOX_WORKDIR:?SANDBOX_WORKDIR must point at the repo to mount}:/workspace"
       - "./pi-home:/opt/pi-home:ro"
+      - "${PI_SANDBOX_GIT_HOME:?PI_SANDBOX_GIT_HOME must point at the host git home}/.gitconfig:/home/pi/.gitconfig:ro"
+      - "${PI_SANDBOX_GIT_HOME:?PI_SANDBOX_GIT_HOME must point at the host git home}/.config/git:/home/pi/.config/git:ro"
       - "pi-home-web:/home/pi/.pi/agent"
       - "mise-data-web:/home/pi/.local/share/mise"
       - "pw-browsers:/opt/pw-browsers"
@@ -74,6 +80,8 @@ services:
       - "${SANDBOX_WORKDIR:?SANDBOX_WORKDIR must point at the repo to mount}:/workspace"
       - "${PI_SANDBOX_ANDROID_SDK:?PI_SANDBOX_ANDROID_SDK must point at the host Android SDK}:/opt/android-sdk:ro"
       - "./pi-home:/opt/pi-home:ro"
+      - "${PI_SANDBOX_GIT_HOME:?PI_SANDBOX_GIT_HOME must point at the host git home}/.gitconfig:/home/pi/.gitconfig:ro"
+      - "${PI_SANDBOX_GIT_HOME:?PI_SANDBOX_GIT_HOME must point at the host git home}/.config/git:/home/pi/.config/git:ro"
       - "pi-home-android:/home/pi/.pi/agent"
       - "mise-data-android:/home/pi/.local/share/mise"
       - "gradle-cache:/home/pi/.gradle"

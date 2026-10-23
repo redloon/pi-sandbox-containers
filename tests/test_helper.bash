@@ -25,11 +25,12 @@ make_tree() {
   export PI_HOME_SRC="$TEST_TMP/config/pi-home"
   export PI_CODING_AGENT_DIR="$TEST_TMP/sbx-agent"
   export PI_SANDBOX_CONFIG="$TEST_TMP/no-such-config"
+  export PI_SANDBOX_GIT_HOME="$TEST_TMP/git-home"
   export PI_SANDBOX_NO_SYNC=1
   unset PI_SANDBOX_PROFILE PI_VERSION XIAOMI_TOKEN_PLAN_SGP_API_KEY \
     PI_SANDBOX_ANDROID_SDK
   mkdir -p "$PI_SANDBOX_HOME" "$PI_AGENT_DIR/extensions" "$PI_AGENT_DIR/npm" \
-    "$PI_CODING_AGENT_DIR/extensions"
+    "$PI_CODING_AGENT_DIR/extensions" "$PI_SANDBOX_GIT_HOME"
   # A fleet home needs compose.yaml + docker/ for the policy paths under test.
   touch "$PI_SANDBOX_HOME/compose.yaml"
   mkdir -p "$PI_SANDBOX_HOME/docker"
@@ -56,11 +57,17 @@ make_shims() {
   mkdir -p "$SHIM_TOOLS" "$SHIM_DOCKER"
   local t
   for t in bash basename cat cmp cp cut dirname find grep head id jq mkdir mktemp \
-    mv readlink rm rsync sed sha256sum stat sort tail tr xargs; do
+    mv readlink rm rsync sed sha256sum stat sort tail touch tr xargs; do
     ln -s "$(command -v "$t")" "$SHIM_TOOLS/$t"
   done
   cat >"$SHIM_TOOLS/pi" <<'EOF'
 #!/usr/bin/env bash
+# Version probes are metadata, not a fallback execution of host pi: they never
+# trip the tripwire (which proves pi is never run *instead of* the sandbox).
+if [[ "${1:-}" == "--version" ]]; then
+  echo "${FAKE_HOST_PI_VERSION:-1.2.0}"
+  exit 0
+fi
 echo "host pi executed: $*" > "${PI_TRIPWIRE:?PI_TRIPWIRE not set}"
 exit 0
 EOF

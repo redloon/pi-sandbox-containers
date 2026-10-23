@@ -15,6 +15,17 @@ seed-pi-home || echo "entrypoint: warning: seed-pi-home failed" >&2
 # one first so a restart cannot report ready too early.
 rm -f /tmp/pi-sandbox-ready
 
+# The mise data volume is seeded from the image only on first use, so a pi
+# version bump would otherwise stay hidden behind the old volume content
+# ("doctor says in sync, pi still old"). Re-pin pi to the image's PI_VERSION
+# whenever they differ.
+if [[ -n "${PI_VERSION:-}" ]] && ! pi --version 2>/dev/null | grep -qx "$PI_VERSION"; then
+  echo "entrypoint: updating pi to $PI_VERSION (sandbox had: $(pi --version 2>/dev/null || echo none))" >&2
+  npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@$PI_VERSION" >/dev/null 2>&1 &&
+    mise reshim >/dev/null 2>&1 ||
+    echo "entrypoint: warning: could not install pi $PI_VERSION" >&2
+fi
+
 # Android profile: the SDK is a read-only host mount at /opt/android-sdk, so the
 # AVD cannot be baked into the image at build time. Create it on first start
 # (idempotent) so the app repo's ensure-emulator.sh finds it ready — the same

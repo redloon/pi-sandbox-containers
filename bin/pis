@@ -32,6 +32,7 @@ Usage:
   pis status                repo, profile, image and container state
   pis doctor [--smoke]      environment checks (+ smoke-test pi auth)
   pis rebuild [general|web|android|all]   force image rebuild (default: profile)
+  pis use-pi [x.y.z]        pin the sandbox pi (default: host pi's) + rebuild
   pis down                  stop this repo's sandbox container
   pis clean -y              stop and DELETE this sandbox's volumes (sessions too)
   pis sync-config [--with-agents] [--keep-pi-sbx] [--no-npm]
@@ -74,10 +75,12 @@ PI_VERSION="${PI_VERSION:-1.2.0}"
 
 # Image content stamp: anything under docker/ or a PI_VERSION bump marks images stale.
 # Failure-proof: config-only commands must work against a bare PI_SANDBOX_HOME.
-DOCKER_HASH="$(
+# Recomputed by `pis use-pi` when the pin changes mid-run.
+compute_docker_hash() {
   { (cd "$PI_SANDBOX_HOME" 2>/dev/null && find docker -type f -print0 2>/dev/null | LC_ALL=C sort -z | xargs -0 -r sha256sum || true) && printf 'pi-%s\n' "$PI_VERSION"; } |
     sha256sum | cut -d' ' -f1
-)"
+}
+DOCKER_HASH="$(compute_docker_hash)"
 KVM_GID="$(stat -c '%g' /dev/kvm 2>/dev/null || echo 0)"
 
 # ----------------------------------------------------------------- compose -- #
@@ -132,6 +135,7 @@ compose() {
       PI_VERSION="$PI_VERSION" \
       DOCKER_HASH="$DOCKER_HASH" \
       PI_SANDBOX_ANDROID_SDK="${PI_SANDBOX_ANDROID_SDK:-$HOME/Android/Sdk}" \
+      PI_SANDBOX_GIT_HOME="${PI_SANDBOX_GIT_HOME:-$HOME}" \
       docker compose "$@")
 }
 
@@ -161,6 +165,23 @@ require_auth() {
   if auth_missing; then
     die "XIAOMI_TOKEN_PLAN_SGP_API_KEY is not configured" \
       "add it to $PI_SANDBOX_HOME/.env (see .env.example) or export it; ./install seeds it from ~/.pi/agent/auth.json"
+  fi
+}
+
+# Version probe only (metadata) — this is not "running pi as a fallback"; the
+# never-fall-back-to-host-pi rule is about executing pi instead of the sandbox.
+host_pi_version() {
+  command -v pi >/dev/null 2>&1 || return 0
+  pi --version 2>/dev/null | sed -n 's/^[^0-9]*\([0-9][0-9.]*\).*/\1/p' | head -1
+}
+
+# Surface version drift early (README: Updating pi): the sandbox pi is pinned
+# and baked into the images while the host pi updates independently.
+warn_on_pi_drift() {
+  local hostpi
+  hostpi="$(host_pi_version)"
+  if [[ -n "$hostpi" && "$hostpi" != "$PI_VERSION" ]]; then
+    warn "pi version drift: host pi $hostpi, sandbox pinned to $PI_VERSION — run 'pis use-pi' to sync (README: Updating pi)"
   fi
 }
 
@@ -241,8 +262,19 @@ ensure_image() {
   fi
 }
 
+# The host git identity/config is bind-mounted read-only into every sandbox so
+# commits inside carry the host identity (README: Git in the sandbox). Prepare
+# the mount sources as empty file/dir when missing — Docker would otherwise
+# create root-owned directories in their place.
+ensure_git_home() {
+  local gh="${PI_SANDBOX_GIT_HOME:-$HOME}"
+  [[ -e "$gh/.gitconfig" ]] || touch "$gh/.gitconfig"
+  mkdir -p "$gh/.config/git"
+}
+
 ensure_container() {
   local out
+  ensure_git_home
   if ! out="$(compose up -d "$PROFILE" 2>&1)"; then
     printf '%s\n' "$out" >&2
     die "failed to start the $PROFILE sandbox container"
@@ -287,6 +319,7 @@ cmd_pi() {
   auto_sync
   need_docker
   require_auth
+  warn_on_pi_drift
   ensure_android_sdk
   ensure_kvm
   ensure_image "$PROFILE"
@@ -425,6 +458,16 @@ cmd_doctor() {
     soft "pi-home/settings.json missing — run: pis sync-config"
   fi
 
+  local hostpi
+  hostpi="$(host_pi_version)"
+  if [[ -z "$hostpi" ]]; then
+    soft "host pi not on PATH — sandboxes keep their pinned pi $PI_VERSION (fine if pi runs only inside)"
+  elif [[ "$hostpi" == "$PI_VERSION" ]]; then
+    ok "pi version in sync (host and sandbox: $PI_VERSION)"
+  else
+    soft "pi version drift: host pi $hostpi, sandbox pinned to $PI_VERSION — run 'pis use-pi' to sync and rebuild (README: Updating pi)"
+  fi
+
   local p have
   for p in general web android; do
     have="$(docker image inspect "pi-sandbox:$p" --format '{{index .Config.Labels "org.pi-sandbox.dockerhash"}}' 2>/dev/null || true)"
@@ -484,6 +527,31 @@ cmd_rebuild() {
     compose build "$t" || die "building pi-sandbox:$t failed"
   done
   note "build complete"
+}
+
+# Pin the sandbox pi version and rebuild — the one command that ends version
+# drift (README: Updating pi). Bare `pis use-pi` adopts the host pi's version.
+cmd_use_pi() {
+  [[ $# -le 1 ]] || die "usage: pis use-pi [x.y.z]" "bare 'pis use-pi' adopts the host pi version"
+  local v="${1:-}" cfg="$CONFIG_FILE"
+  if [[ -z "$v" ]]; then
+    v="$(host_pi_version)"
+    [[ -n "$v" ]] ||
+      die "host pi not found on PATH — pass an explicit version" "usage: pis use-pi x.y.z (e.g. pis use-pi 1.4.0)"
+  fi
+  [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.+-]+)?$ ]] ||
+    die "not a pi version: '$v'" "usage: pis use-pi x.y.z (e.g. pis use-pi 1.4.0)"
+  mkdir -p "$(dirname "$cfg")"
+  if [[ -f "$cfg" ]] && grep -q '^PI_VERSION=' "$cfg"; then
+    sed -i "s/^PI_VERSION=.*/PI_VERSION=$v/" "$cfg"
+  else
+    printf 'PI_VERSION=%s\n' "$v" >>"$cfg"
+  fi
+  PI_VERSION="$v"
+  DOCKER_HASH="$(compute_docker_hash)"
+  note "sandbox pi pinned to $v (saved in $cfg)"
+  cmd_rebuild all
+  note "images rebuilt with pi $v — next 'pis' run uses it"
 }
 
 cmd_down() {
@@ -728,6 +796,10 @@ main() {
     rebuild)
       shift
       cmd_rebuild "$@"
+      ;;
+    use-pi)
+      shift
+      cmd_use_pi "$@"
       ;;
     down)
       shift

@@ -18,10 +18,13 @@ What crosses the boundary, by design:
 | Network egress | out | required for the Xiaomi API, npm, mise, Gradle, SDK downloads |
 | pi-home overlay | read-only in | your settings/AGENTS.md/skills, re-seeded per start |
 | `~/Android/Sdk` bind mount (android profile, `PI_SANDBOX_ANDROID_SDK`) | read-only in | the Android toolchain (SDK, emulator, system image); pure tooling — no credentials live there and the sandbox cannot write to it |
+| `~/.gitconfig` + `~/.config/git` (`PI_SANDBOX_GIT_HOME`) | read-only in | git identity/config so commits inside carry your identity; keep tokens out of your gitconfig — anything embedded there is readable inside |
 
 Everything else in your home directory — other repos, SSH keys, cloud
-credentials, host pi sessions — is **not mounted and not reachable**. The one
-carve-out is the Android SDK row above (toolchain only, read-only).
+credentials, host pi sessions — is **not mounted and not reachable**. The only
+carve-outs are the read-only rows above (Android toolchain, git config).
+Deliberately never mounted: `~/.ssh`, `~/.git-credentials`, ssh-agent — so
+push/PR and credentialed fetch stay on the host.
 
 ## Hardening (applied in `compose.yaml`)
 

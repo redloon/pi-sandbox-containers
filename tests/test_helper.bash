@@ -26,7 +26,8 @@ make_tree() {
   export PI_CODING_AGENT_DIR="$TEST_TMP/sbx-agent"
   export PI_SANDBOX_CONFIG="$TEST_TMP/no-such-config"
   export PI_SANDBOX_NO_SYNC=1
-  unset PI_SANDBOX_PROFILE PI_VERSION XIAOMI_TOKEN_PLAN_SGP_API_KEY
+  unset PI_SANDBOX_PROFILE PI_VERSION XIAOMI_TOKEN_PLAN_SGP_API_KEY \
+    PI_SANDBOX_ANDROID_SDK
   mkdir -p "$PI_SANDBOX_HOME" "$PI_AGENT_DIR/extensions" "$PI_AGENT_DIR/npm" \
     "$PI_CODING_AGENT_DIR/extensions"
   # A fleet home needs compose.yaml + docker/ for the policy paths under test.
@@ -86,7 +87,9 @@ case "${1:-}" in
         if [[ "${FAKE_DOCKER_DUMP+x}" == x ]]; then
           printf '%s\n' "${DOCKER_HASH:-}" > "$FAKE_DOCKER_DUMP"
         fi
-        if [[ "${2:-}" == exec && "${FAKE_EXEC_RC:-0}" != 0 ]]; then
+        # The ready-marker probe is infrastructure, not a user command: it
+        # always answers "ready" so FAKE_EXEC_RC keeps modelling user execs.
+        if [[ "${2:-}" == exec && "$*" != *pi-sandbox-ready* && "${FAKE_EXEC_RC:-0}" != 0 ]]; then
           exit "$FAKE_EXEC_RC"
         fi
         ;;

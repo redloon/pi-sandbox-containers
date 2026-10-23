@@ -6,6 +6,8 @@
 #   HOST_UID/HOST_GID  build-args mapping the container user to you
 #   PI_VERSION       pi version baked into the images
 #   DOCKER_HASH      content stamp; stale images auto-rebuild on next `pis`
+#   PI_SANDBOX_ANDROID_SDK  host Android SDK, mounted read-only at
+#                    /opt/android-sdk (android service only)
 #
 # Security posture (see docs/security.md): non-root user, cap_drop: ALL,
 # no-new-privileges, no docker.sock, no published ports, outbound egress only.
@@ -70,6 +72,7 @@ services:
     group_add: ["${KVM_GID:-0}"]
     volumes:
       - "${SANDBOX_WORKDIR:?SANDBOX_WORKDIR must point at the repo to mount}:/workspace"
+      - "${PI_SANDBOX_ANDROID_SDK:?PI_SANDBOX_ANDROID_SDK must point at the host Android SDK}:/opt/android-sdk:ro"
       - "./pi-home:/opt/pi-home:ro"
       - "pi-home-android:/home/pi/.pi/agent"
       - "mise-data-android:/home/pi/.local/share/mise"

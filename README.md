@@ -34,7 +34,7 @@ pulling changes.
 
 | Profile | Auto-detected when the repo has | Contains |
 |---|---|---|
-| `android` | `settings.gradle.kts` / `build.gradle[.kts]` | everything below + JDK 21 (mise) + Android SDK + headless emulator (AVD `pixel_6_api_34`, KVM-accelerated) |
+| `android` | `settings.gradle.kts` / `build.gradle[.kts]` | everything below + JDK 21 (mise) + the host's Android SDK (mounted read-only) + headless emulator (AVD `pixel_6_api_34`, KVM-accelerated) |
 | `web` | `package.json` | everything below + Playwright + pre-baked Chromium |
 | `general` | anything else | mise, node 24, pi, git/ripgrep/fd/jq, build tools, tmux, python |
 
@@ -42,9 +42,15 @@ Override detection with `PI_SANDBOX_PROFILE=web pis …` or a `.pi-sandbox.toml`
 the repo root: `profile = "android"`. Precedence: env → file → auto-detect
 (android > web > general).
 
-Android's weight lives **only** in the android image. Profiles run as separate
-containers per repo, so parallel projects never collide and sessions persist per
-repo+profile until `pis clean -y`.
+Android's multi-GB toolchain lives **only** on the host: the android sandbox
+mounts `~/Android/Sdk` (override with `PI_SANDBOX_ANDROID_SDK`) read-only at
+`/opt/android-sdk`, and the image itself just adds JDK 21 and the emulator's
+runtime libraries to `general`. Required SDK components: `cmdline-tools/latest`,
+`platform-tools`, `emulator`, `platforms/android-36`, `build-tools/36.0.0`,
+`system-images;android-34;google_apis;x86_64` — `pis doctor` checks them and
+`pis` hard-errors with a provisioning hint when any are missing. Profiles run as
+separate containers per repo, so parallel projects never collide and sessions
+persist per repo+profile until `pis clean -y`.
 
 ## Commands
 
@@ -91,8 +97,9 @@ through to pi (e.g. a prompt literally named "shell").
 - **Crash-proof debugging**: the container is a keep-alive box independent of pi.
   When pi exits or crashes, interactive `pis` drops you into a sandbox shell with
   the state intact; `pis shell` / `pis logs` work any time afterwards.
-- **Workspaces**: each repo is bind-mounted read-write at `/workspace` (and
-  nothing else from your home directory is visible).
+- **Workspaces**: each repo is bind-mounted read-write at `/workspace`. The only
+  other home-directory mount is the Android SDK (android profile), read-only —
+  nothing else from your home directory is visible.
 - **Invariants, regression-tested**: the bats suite in `tests/` (run via
   `scripts/check.sh`) guards that config deletions propagate at every layer
   (host → `pi-home/` → container volume), junk extension files are quarantined

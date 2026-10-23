@@ -10,6 +10,25 @@ set -uo pipefail
 
 seed-pi-home || echo "entrypoint: warning: seed-pi-home failed" >&2
 
+# `pis` polls for this marker before running anything in a fresh container
+# (compose up -d returns while this script is still working); remove any stale
+# one first so a restart cannot report ready too early.
+rm -f /tmp/pi-sandbox-ready
+
+# Android profile: the SDK is a read-only host mount at /opt/android-sdk, so the
+# AVD cannot be baked into the image at build time. Create it on first start
+# (idempotent) so the app repo's ensure-emulator.sh finds it ready — the same
+# AVD that script would fall back to creating.
+if [[ -d /opt/android-sdk/system-images/android-34/google_apis/x86_64 ]] &&
+  ! emulator -list-avds 2>/dev/null | grep -qx 'pixel_6_api_34'; then
+  echo no | avdmanager create avd -n pixel_6_api_34 \
+    -k "system-images;android-34;google_apis;x86_64" --force >/dev/null 2>&1 ||
+    echo "entrypoint: warning: could not pre-create AVD pixel_6_api_34 (ensure-emulator.sh retries)" >&2
+fi
+
+# Startup work is done — execs may now rely on the prepared sandbox state.
+touch /tmp/pi-sandbox-ready
+
 if [[ -f /workspace/mise.toml || -f /workspace/.tool-versions ]]; then
   mise trust /workspace >/dev/null 2>&1 || true
   if ! (cd /workspace && mise install); then

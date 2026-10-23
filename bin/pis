@@ -131,6 +131,7 @@ compose() {
       HOST_GID="$(id -g)" \
       PI_VERSION="$PI_VERSION" \
       DOCKER_HASH="$DOCKER_HASH" \
+      PI_SANDBOX_ANDROID_SDK="${PI_SANDBOX_ANDROID_SDK:-$HOME/Android/Sdk}" \
       docker compose "$@")
 }
 
@@ -174,6 +175,59 @@ ensure_kvm() {
   fi
 }
 
+# The android sandbox bind-mounts the host Android SDK read-only at
+# /opt/android-sdk (see compose.yaml): the image carries only JDK 21 and the
+# emulator's runtime libs. Refuse to start with a missing or partial SDK — the
+# failure would otherwise surface much later inside Gradle/emulator, far from
+# the cause.
+ANDROID_SDK_REQUIRED=(
+  "cmdline-tools/latest"
+  "platform-tools"
+  "emulator"
+  "platforms/android-36"
+  "build-tools/36.0.0"
+  "system-images/android-34/google_apis/x86_64"
+)
+
+android_sdk_root() { printf '%s' "${PI_SANDBOX_ANDROID_SDK:-$HOME/Android/Sdk}"; }
+
+# Print the required components missing under the SDK root (the root itself when
+# the directory is absent); empty output means the SDK is complete.
+android_sdk_missing_parts() {
+  local root="$1" p
+  if [[ ! -d "$root" ]]; then
+    printf '%s\n' "$root"
+    return 0
+  fi
+  for p in "${ANDROID_SDK_REQUIRED[@]}"; do
+    [[ -d "$root/$p" ]] || printf '%s\n' "$p"
+  done
+}
+
+# Comma-joined missing parts for humans (pure bash: this runs under the test
+# suite's restricted PATH too).
+android_sdk_missing_csv() {
+  local p csv=""
+  while IFS= read -r p; do
+    [[ -n "$p" ]] && csv="${csv:+$csv, }$p"
+  done < <(android_sdk_missing_parts "$1")
+  printf '%s' "$csv"
+}
+
+ensure_android_sdk() {
+  [[ "$PROFILE" == android ]] || return 0
+  local root missing
+  root="$(android_sdk_root)"
+  missing="$(android_sdk_missing_csv "$root")"
+  if [[ ! -d "$root" ]]; then
+    die "the android sandbox needs a host Android SDK at $root — the directory does not exist" \
+      "provision one (Android Studio's SDK Manager, or: sdkmanager \"platform-tools\" \"emulator\" \"platforms;android-36\" \"build-tools;36.0.0\" \"system-images;android-34;google_apis;x86_64\") or set PI_SANDBOX_ANDROID_SDK=/path/to/Android/Sdk"
+  fi
+  [[ -z "$missing" ]] ||
+    die "the host Android SDK at $root is incomplete — missing: $missing" \
+      "install the missing components (sdkmanager \"platform-tools\" \"emulator\" \"platforms;android-36\" \"build-tools;36.0.0\" \"system-images;android-34;google_apis;x86_64\") or set PI_SANDBOX_ANDROID_SDK=/path/to/Android/Sdk"
+}
+
 ensure_image() {
   local p="$1" have
   if [[ "$p" != general ]]; then
@@ -193,6 +247,18 @@ ensure_container() {
     printf '%s\n' "$out" >&2
     die "failed to start the $PROFILE sandbox container"
   fi
+  # compose up -d returns as soon as the container runs, while the entrypoint is
+  # still seeding config and preparing the sandbox (e.g. the android AVD).
+  # Wait for its ready marker or an immediate exec races that work.
+  local i
+  for ((i = 0; i < 120; i++)); do
+    if compose exec -T "$PROFILE" test -e /tmp/pi-sandbox-ready >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  die "the $PROFILE sandbox container did not become ready within 60s" \
+    "check startup output: pis logs"
 }
 
 # Pi runs with all tools and zero permission prompts (the container IS the
@@ -221,6 +287,7 @@ cmd_pi() {
   auto_sync
   need_docker
   require_auth
+  ensure_android_sdk
   ensure_kvm
   ensure_image "$PROFILE"
   ensure_container
@@ -233,6 +300,7 @@ cmd_run() {
   resolve_context
   auto_sync
   need_docker
+  ensure_android_sdk
   ensure_kvm
   ensure_image "$PROFILE"
   ensure_container
@@ -244,6 +312,7 @@ cmd_shell() {
   resolve_context
   auto_sync
   need_docker
+  ensure_android_sdk
   ensure_kvm
   ensure_image "$PROFILE"
   ensure_container
@@ -281,6 +350,16 @@ cmd_status() {
       printf 'kvm:       ok (/dev/kvm, gid %s)\n' "$KVM_GID"
     else
       printf 'kvm:       MISSING or not accessible\n'
+    fi
+    local sdk_root sdk_missing
+    sdk_root="$(android_sdk_root)"
+    sdk_missing="$(android_sdk_missing_csv "$sdk_root")"
+    if [[ ! -d "$sdk_root" ]]; then
+      printf 'sdk:       MISSING (expected at %s)\n' "$sdk_root"
+    elif [[ -z "$sdk_missing" ]]; then
+      printf 'sdk:       ok (%s)\n' "$sdk_root"
+    else
+      printf 'sdk:       INCOMPLETE at %s — missing: %s\n' "$sdk_root" "$sdk_missing"
     fi
   fi
   printf 'container:\n'
@@ -327,6 +406,19 @@ cmd_doctor() {
     soft "/dev/kvm not found — android emulator cannot run on this machine"
   fi
 
+  if [[ "$PROFILE" == android ]]; then
+    local sdk_root sdk_missing
+    sdk_root="$(android_sdk_root)"
+    sdk_missing="$(android_sdk_missing_csv "$sdk_root")"
+    if [[ ! -d "$sdk_root" ]]; then
+      bad "android SDK not found at $sdk_root — the android profile will refuse to start (set PI_SANDBOX_ANDROID_SDK=/path/to/Android/Sdk)"
+    elif [[ -z "$sdk_missing" ]]; then
+      ok "android SDK complete ($sdk_root, mounted read-only at /opt/android-sdk)"
+    else
+      bad "android SDK at $sdk_root is incomplete — missing: $sdk_missing"
+    fi
+  fi
+
   if [[ -f "$PI_SANDBOX_HOME/pi-home/settings.json" ]]; then
     ok "pi-home/settings.json present"
   else
@@ -348,6 +440,7 @@ cmd_doctor() {
   if [[ $smoke == 1 ]]; then
     printf 'smoke test: running pi inside the %s sandbox…\n' "$PROFILE"
     require_auth
+    ensure_android_sdk
     ensure_kvm
     ensure_image "$PROFILE"
     ensure_container

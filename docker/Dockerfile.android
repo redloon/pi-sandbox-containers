@@ -1,19 +1,28 @@
-# pi-sandbox:android — general sandbox + JDK 21 + Android SDK + hardware-accelerated emulator.
+# pi-sandbox:android — general sandbox + JDK 21 + emulator runtime libs, with the
+# Android SDK mounted read-only from the host.
+#
+# The multi-GB SDK is deliberately NOT baked into this image: `pis` bind-mounts
+# $PI_SANDBOX_ANDROID_SDK (default ~/Android/Sdk) at /opt/android-sdk:ro (see
+# compose.yaml). That keeps the toolchain on the host, makes image builds
+# network-free for SDK components (no flaky dl.google.com downloads to fail
+# mid-build), and lets PATH/ANDROID_HOME below point at the well-known
+# /opt/android-sdk location regardless of the host path.
 #
 # Tuned for ~/work/personal-crm's test flow (scripts/run-tests.sh):
-#   - AVD `pixel_6_api_34` pre-created from system-images;android-34;google_apis;x86_64
-#     (exactly what ensure-emulator.sh falls back to creating)
-#   - platforms;android-36 + build-tools;36.0.0 for compileSdk 36 / AGP 9
+#   - AVD `pixel_6_api_34` is pre-created at container start (docker/entrypoint.sh)
+#     from system-images;android-34;google_apis;x86_64 — exactly what
+#     ensure-emulator.sh falls back to creating
+#   - the mounted SDK carries platforms;android-36 + build-tools;36.0.0 for
+#     compileSdk 36 / AGP 9
 #   - JDK 21 via mise (Gradle 9.x requires JVM 17+)
 #   - emulator runs headless (-no-window -gpu swiftshader_indirect) on /dev/kvm,
 #     passed through by compose with the host's kvm group
 #
-# This image is deliberately the ONLY one carrying the Android stack.
+# This image is deliberately the ONLY one carrying the Android runtime stack.
 ARG BASE_IMAGE=pi-sandbox:general
 FROM ${BASE_IMAGE}
 
 ARG DOCKER_HASH=
-ARG CMDLINE_TOOLS_VERSION=11076708
 LABEL org.pi-sandbox.dockerhash="${DOCKER_HASH}" \
       org.pi-sandbox.profile="android"
 
@@ -24,7 +33,9 @@ RUN /home/pi/.local/bin/mise use -g java@temurin-21 \
  && /home/pi/.local/bin/mise reshim
 ENV JAVA_HOME=/home/pi/.local/java-21
 
-# --- Android SDK (created as root, owned by pi for runtime sdkmanager use) ---
+# --- Android SDK mount point (populated read-only from the host at runtime) ---
+# Pre-created with sane ownership so the bind mount always has a home; its
+# contents shadow this directory the moment the sandbox starts.
 USER root
 RUN mkdir -p /opt/android-sdk && chown pi:pi /opt/android-sdk
 
@@ -33,32 +44,13 @@ ENV ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk \
     PATH=/home/pi/.local/share/mise/shims:/home/pi/.local/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/emulator:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-RUN curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS_VERSION}_latest.zip" -o /tmp/cmdline-tools.zip \
- && unzip -q /tmp/cmdline-tools.zip -d /opt/android-sdk/cmdline-tools \
- && mv /opt/android-sdk/cmdline-tools/cmdline-tools /opt/android-sdk/cmdline-tools/latest \
- && rm /tmp/cmdline-tools.zip
-
-# Accept licenses up front so Gradle/AGP can auto-resolve any extra components.
-RUN yes | sdkmanager --licenses >/dev/null 2>&1 || true
-
-RUN sdkmanager \
-      "platform-tools" \
-      "emulator" \
-      "platforms;android-36" \
-      "build-tools;36.0.0" \
-      "system-images;android-34;google_apis;x86_64"
-
-# Pre-create the AVD the test scripts expect ("no" = no custom hardware profile).
-RUN echo no | avdmanager create avd -n pixel_6_api_34 \
-      -k "system-images;android-34;google_apis;x86_64" --force
-
 # --- emulator runtime libraries (headless still links X11/GL) ---
-# Kept as the final layer so the SDK layers above stay cacheable.
+# Kept as the final layer so the JDK layer above stays cacheable.
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libx11-6 libx11-xcb1 libxcb1 libxext6 libxrender1 libxtst6 libxi6 \
       libxrandr2 libxcursor1 libxdamage1 libxfixes3 libxcomposite1 \
-      libgl1 libglib2.0-0 libnss3 libasound2t64 libpulse0 \
+      libgl1 libglib2.0-0t64 libnss3 libasound2t64 libpulse0 \
     && rm -rf /var/lib/apt/lists/*
 
 USER pi

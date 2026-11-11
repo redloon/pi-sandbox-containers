@@ -122,8 +122,8 @@ COMPOSE_PROJECT_NAME=""
 
 resolve_context() {
   local dir="$PWD"
-  while [[ "$dir" != "/" && ! -d "$dir/.git" ]]; do dir="$(dirname "$dir")"; done
-  if [[ -d "$dir/.git" ]]; then REPO_ROOT="$dir"; else REPO_ROOT="$PWD"; fi
+  while [[ "$dir" != "/" && ! -d "$dir/.git" && ! -f "$dir/.git" ]]; do dir="$(dirname "$dir")"; done
+  if [[ -d "$dir/.git" || -f "$dir/.git" ]]; then REPO_ROOT="$dir"; else REPO_ROOT="$PWD"; fi
 
   PROFILE="${PI_SANDBOX_PROFILE:-}"
   if [[ -n "$PROFILE" ]]; then

@@ -73,6 +73,33 @@ teardown() {
   [[ "$output" =~ project:\ \ \ pi-sbx-my-project-[0-9a-f]{6} ]]
 }
 
+make_worktree() (
+  export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+  git -C "$TEST_TMP/repo" init -q --template=
+  git -C "$TEST_TMP/repo" -c user.name=Test -c user.email=test@example.com \
+    commit -qm initial --allow-empty
+  git -C "$TEST_TMP/repo" worktree add -q --detach "$1"
+  mkdir -p "$1/a/b"
+)
+
+@test "repo root is found from nested dirs in a linked worktree" {
+  worktree="$TEST_TMP/worktree"
+  make_worktree "$worktree"
+  cd "$worktree/a/b"
+  run env PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" status
+  [ "$status" -eq 0 ]
+  [ "$(grep '^repo:' <<<"$output")" = "repo:      $worktree" ]
+}
+
+@test "linked worktree root takes precedence over an enclosing repo" {
+  worktree="$TEST_TMP/repo/tmp/vl-test"
+  make_worktree "$worktree"
+  cd "$worktree/a/b"
+  run env PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" status
+  [ "$status" -eq 0 ]
+  [ "$(grep '^repo:' <<<"$output")" = "repo:      $worktree" ]
+}
+
 @test "project name is stable across invocations and differs across paths" {
   cd "$TEST_TMP/My Project"
   run env PATH="$SHIM_DOCKER:$SHIM_TOOLS" "$PIS" status
